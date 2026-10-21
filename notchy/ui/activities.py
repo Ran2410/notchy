@@ -266,6 +266,11 @@ class Activities(QWidget):
         self._dl_marquee_t.setInterval(40)
         self._dl_marquee_t.timeout.connect(self._dl_marquee_tick)
 
+        self._progress_tick_t = QTimer(self)
+        self._progress_tick_t.setInterval(250)
+        self._progress_tick_t.timeout.connect(self._progress_tick)
+        self._progress_tick_t.start()
+
         self._lyrics_tick_t = QTimer(self)
         self._lyrics_tick_t.setInterval(250)
         self._lyrics_tick_t.timeout.connect(self._lyrics_tick)
@@ -812,8 +817,8 @@ class Activities(QWidget):
         elif not lines:
             self.lyrics_state.setText("tidak tersedia")
         else:
-            self.lyrics_state.setText(
-                f"{getattr(result, 'artist', '')} · {getattr(result, 'title', '')}")
+            # jangan ulangi judul (sudah ada di pemutar kiri) — cukup status
+            self.lyrics_state.setText("tersinkron" if self._lyrics_synced else "tanpa sinkron")
 
         if not lines:
             hint = QLabel("Lirik belum tersedia untuk lagu ini." if status != "loading"
@@ -897,13 +902,8 @@ class Activities(QWidget):
             else:
                 break
         if idx != self._lyric_idx:
-            dim_pm, active_pm = self._note_icons(13, 3)
-            if 0 <= self._lyric_idx < len(self._lyric_labels):
-                prev = self._lyric_labels[self._lyric_idx]
-                if prev.property("is_note") and dim_pm is not None:
-                    prev.setPixmap(dim_pm)
-                else:
-                    prev.setStyleSheet("")
+            _dim, active_pm = self._note_icons(13, 3)
+            self._clear_all_highlights()
             self._lyric_idx = idx
             if idx >= 0:
                 lbl = self._lyric_labels[idx]
@@ -915,6 +915,17 @@ class Activities(QWidget):
                 # jangan tarik posisi bila user sedang scroll manual
                 if time.monotonic() > getattr(self, "_user_scroll_until", 0.0):
                     self._ensure_line_visible(lbl)
+
+    def _clear_all_highlights(self) -> None:
+        """Pastikan hanya satu baris yang menyala — bersihkan semua label."""
+        dim_pm, _active = self._note_icons(13, 3)
+        for lbl in getattr(self, "_lyric_labels", []):
+            if lbl.property("is_note"):
+                if dim_pm is not None:
+                    lbl.setPixmap(dim_pm)
+            elif lbl.styleSheet():
+                lbl.setStyleSheet("")
+        self._lyric_idx = -1
 
     def _lyric_time_of(self, lbl) -> tuple[float, str]:
         return (float(lbl.property("lyric_time") or 0.0), lbl.text())
@@ -1383,7 +1394,7 @@ class Activities(QWidget):
                 self.lyrics_seek.emit(t_sec)
                 self._pos_base = t_sec
                 self._pos_t = time.monotonic()
-                self._lyric_idx = -1
+                self._clear_all_highlights()
                 self._user_scroll_until = 0.0
             return True
         # shuffle / loop
@@ -1571,6 +1582,7 @@ class Activities(QWidget):
         self._pos_base = float(getattr(np, "position", 0.0) or 0.0)
         self._pos_t = time.monotonic()
         self._pos_playing = self._playing
+        self._length = float(getattr(np, "length", 0.0) or 0.0)
         if self._has_media:
             label = np.title if not np.artist else f"{np.title} — {np.artist}"
             # sneak-peek saat lagu berganti (padanan sneakPeekEvent)
@@ -1654,30 +1666,34 @@ class Activities(QWidget):
         self.compact_clock.setText(st.time_str)
         self._refresh_compact()
 
-    def _set_scrub(self, frac: float, animate: bool = True) -> None:
-        """Animasi glide antar posisi (polling 0,9 dtk → gores mulus)."""
-        self._frac = max(0.0, min(1.0, frac or 0.0))
-        target = max(0, int(self.scrub.width() * self._frac))
-        if not animate or self.scrub.width() <= 0:
-            self.scrub_fill.setGeometry(0, 0, target, self.scrub.height())
-            if hasattr(self, "scrub2"):
-                w2 = max(0, int(self.scrub2.width() * self._frac))
-                self.scrub2_fill.setGeometry(0, 0, w2, self.scrub2.height())
-            return
-        start = self.scrub_fill.width()
-        if start == target:
-            return
-        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+    def _apply_fill_frac(self, frac: float) -> None:
+        frac = max(0.0, min(1.0, frac))
+        w1 = max(0, int(self.scrub.width() * frac))
+        self.scrub_fill.setGeometry(0, 0, w1, self.scrub.height())
+        if hasattr(self, "scrub2") and self.scrub2.width() > 0:
+            w2 = max(0, int(self.scrub2.width() * frac))
+            self.scrub2_fill.setGeometry(0, 0, w2, self.scrub2.height())
 
-        anim = QVariantAnimation(self)
-        anim.setDuration(420)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.setStartValue(float(start))
-        anim.setEndValue(float(target))
-        anim.valueChanged.connect(
-            lambda v: self.scrub_fill.setGeometry(0, 0, int(v), self.scrub.height()))
-        self._scrub_anim = anim
-        anim.start()
+    def _set_scrub(self, frac: float, animate: bool = True) -> None:
+        """Set posisi progress — kedua bar (normal & lirik) selalu sinkron."""
+        self._frac = max(0.0, min(1.0, frac or 0.0))
+        self._apply_fill_frac(self._frac)
+
+    def _progress_tick(self) -> None:
+        """Gerakkan progress tiap 250ms dari posisi terinterpolasi (anti-stuck)."""
+        length = float(getattr(self, "_length", 0.0) or 0.0)
+        if length <= 0:
+            return
+        pos = max(0.0, min(length, self._current_pos()))
+        frac = pos / length
+        self._apply_fill_frac(frac)
+        now_txt = fmt_time(pos)
+        len_txt = fmt_time(length)
+        self.time_now.setText(now_txt)
+        self.time_len.setText(len_txt)
+        if hasattr(self, "time2_now"):
+            self.time2_now.setText(now_txt)
+            self.time2_len.setText(len_txt)
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)

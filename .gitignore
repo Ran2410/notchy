@@ -25,6 +25,9 @@ __pycache__/
 .cache/
 *.part
 
+# --- Screenshot lokal (tidak di-push) ---
+shots/
+
 # --- OS / editor ---
 .DS_Store
 Thumbs.db

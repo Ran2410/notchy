@@ -7,10 +7,6 @@ engineering pada binary shipped-nya. Visual mengikuti bahasa desain
 kartu musik + bento tiles + waveform saat dibuka, lengkap dengan thumbnail
 album art asli dari pemutar.
 
-![closed](shots/01-closed.png)
-![expanded](shots/02-expanded.png)
-![tabs](shots/05-tab-sistem.png)
-
 ## Dukungan OS
 
 | | Linux | Windows 10/11 |
@@ -133,8 +129,7 @@ notchy/ui/
 notchy/timer.py             kontrol timer/pomodoro
 notchy/services.py          cuaca (Open-Meteo), agenda ICS, watcher unduhan
 legacy/gtk/                 implementasi GTK3 lama (Linux-only, referensi)
-scripts/capture_qt.py       uji visual → shots/
-shots/                      screenshot UI
+scripts/capture_qt.py       uji visual → shots/ (di-ignore)
 ```
 
 ## Konfigurasi opsional
