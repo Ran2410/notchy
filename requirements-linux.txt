@@ -1,0 +1,5 @@
+# Linux (Ubuntu 26.04 / distro modern)
+PySide6-Essentials>=6.6
+psutil>=5.9
+# dbus-python biasanya sudah terpasang via apt: python3-dbus
+# (venv harus dibuat dengan: python3 -m venv --system-site-packages .venv)

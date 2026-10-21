@@ -1,0 +1,6 @@
+# Windows 10 1809+ / Windows 11
+PySide6-Essentials>=6.6
+psutil>=5.9
+winsdk>=1.0.0b10       # Global System Media Transport Controls (SMTC)
+pycaw>=20240210        # Core Audio volume
+comtypes>=1.4          # dependensi pycaw

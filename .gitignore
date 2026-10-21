@@ -1,0 +1,33 @@
+# --- Artefak REA / reverse-engineering: JANGAN pernah di-push ---
+# berisi binary pihak ketiga (boringNotch.dmg, hasil ekstraksi APFS/Mach-O)
+# dan dump evidence analisis
+reanalysis/
+*.dmg
+*.img
+*.ipa
+*.apk
+
+# --- Virtualenv & dependensi terpasang ---
+.venv/
+venv/
+env/
+tools/
+
+# --- Python build/cache ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Cache runtime aplikasi (thumbnail album, dll) ---
+.cache/
+*.part
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
