@@ -656,7 +656,7 @@ class Activities(QWidget):
         left.setFixedWidth(176)
         lv = QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
-        lv.setSpacing(8)
+        lv.setSpacing(7)
 
         top = QHBoxLayout()
         top.setSpacing(10)
@@ -680,6 +680,7 @@ class Activities(QWidget):
         meta.addStretch(1)
         top.addLayout(meta, 1)
         lv.addLayout(top)
+        lv.addSpacing(5)   # jarak art → progress bar
 
         self.scrub2 = QFrame()
         self.scrub2.setObjectName("scrub")
@@ -719,19 +720,75 @@ class Activities(QWidget):
             sl2.addWidget(btn)
         lv.addWidget(seg2)
 
+        # baris toggle: shuffle · loop · kembali
+        trow = QHBoxLayout()
+        trow.setSpacing(6)
+
+        self.btn_shuffle2 = QLabel("⇄")
+        self.btn_shuffle2.setObjectName("toggle-btn")
+        self.btn_shuffle2.setAlignment(Qt.AlignCenter)
+        self.btn_shuffle2.setFixedSize(40, 28)
+        self.btn_shuffle2.setToolTip("Shuffle")
+        self.btn_shuffle2.installEventFilter(self)
+        self.btn_shuffle2.setProperty("media_action", "shuffle")
+        trow.addWidget(self.btn_shuffle2)
+
+        self.btn_loop2 = QLabel("↻")
+        self.btn_loop2.setObjectName("toggle-btn")
+        self.btn_loop2.setAlignment(Qt.AlignCenter)
+        self.btn_loop2.setFixedSize(40, 28)
+        self.btn_loop2.setToolTip("Repeat: None → Playlist → Track")
+        self.btn_loop2.installEventFilter(self)
+        self.btn_loop2.setProperty("media_action", "loop")
+        trow.addWidget(self.btn_loop2)
+
         self.btn_back = QLabel()
         self.btn_back.setObjectName("toggle-btn")
         self.btn_back.setAlignment(Qt.AlignCenter)
-        self.btn_back.setFixedSize(40, 32)
+        self.btn_back.setFixedSize(40, 28)
         self.btn_back.setToolTip("Kembali ke pemutar musik")
         self.btn_back.installEventFilter(self)
         self.btn_back.setProperty("lyrics_toggle", True)
         _pmb = QPixmap(os.path.join(ASSETS_DIR, "music-icon.png"))
         if not _pmb.isNull():
-            self.btn_back.setPixmap(_pmb.scaledToHeight(18, Qt.SmoothTransformation))
+            self.btn_back.setPixmap(_pmb.scaledToHeight(17, Qt.SmoothTransformation))
         else:
             self.btn_back.setText("‹ Musik")
-        lv.addWidget(self.btn_back)
+        trow.addWidget(self.btn_back)
+        trow.addStretch(1)
+        lv.addLayout(trow)
+
+        # volume
+        volrow = QHBoxLayout()
+        volrow.setSpacing(6)
+        vlbl = QLabel("VOL")
+        vlbl.setObjectName("t-tiny")
+        vlbl.setFixedWidth(24)
+        volrow.addWidget(vlbl)
+        self.vol_slider2 = QSlider(Qt.Horizontal)
+        self.vol_slider2.setRange(0, 100)
+        self.vol_slider2.setFixedHeight(16)
+        self.vol_slider2.valueChanged.connect(self.volume_changed.emit)
+        volrow.addWidget(self.vol_slider2, 1)
+        self.vol_pct2 = QLabel("—")
+        self.vol_pct2.setObjectName("t-tiny")
+        self.vol_pct2.setFixedWidth(34)
+        self.vol_pct2.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        volrow.addWidget(self.vol_pct2)
+        lv.addLayout(volrow)
+
+        # waveform mini — hidup saat musik berjalan
+        wave2_card = QFrame()
+        wave2_card.setObjectName("footer")
+        w2l = QHBoxLayout(wave2_card)
+        w2l.setContentsMargins(10, 6, 10, 6)
+        w2l.setSpacing(0)
+        w2l.addStretch(1)
+        self.music_wave2 = self._make_wave(16, base=22)
+        w2l.addWidget(self.music_wave2)
+        w2l.addStretch(1)
+        lv.addWidget(wave2_card)
+
         lv.addStretch(1)
 
         lay.addWidget(left)
@@ -1064,6 +1121,11 @@ class Activities(QWidget):
             self.btn_loop.setText("↻")
             self.btn_shuffle.setEnabled(False)
             self.btn_loop.setEnabled(False)
+            if hasattr(self, "btn_shuffle2"):
+                self.btn_shuffle2.setEnabled(False)
+                self.btn_shuffle2.setStyleSheet("")
+                self.btn_loop2.setEnabled(False)
+                self.btn_loop2.setStyleSheet("")
             return
         self.chip_source.setText(np.identity or "—")
         self.chip_album.setText((np.album or "no album")[:28] or "—")
@@ -1081,6 +1143,16 @@ class Activities(QWidget):
                 f"Shuffle tidak didukung {player} (butuh Spotify/VLC/mpv)")
             self.btn_shuffle.setStyleSheet("color: rgba(255,255,255,0.25);")
 
+        for dup_s, dup_l in ((getattr(self, "btn_shuffle2", None),
+                              getattr(self, "btn_loop2", None)),):
+            if dup_s is not None:
+                dup_s.setEnabled(bool(np.can_shuffle))
+                dup_s.setStyleSheet(on if (np.can_shuffle and np.shuffle) else
+                                    ("" if np.can_shuffle else "color: rgba(255,255,255,0.25);"))
+            if dup_l is not None:
+                dup_l.setEnabled(bool(np.can_loop))
+                dup_l.setStyleSheet(on if (np.can_loop and np.loop_status != "None") else
+                                    ("" if np.can_loop else "color: rgba(255,255,255,0.25);"))
         self.btn_loop.setEnabled(bool(np.can_loop))
         if np.can_loop:
             loop_txt = {"None": "↻", "Track": "①", "Playlist": "∞"}.get(np.loop_status, "↻")
@@ -1653,6 +1725,12 @@ class Activities(QWidget):
             self.compact_bat.setText("AC")
             self._sys_hint = "AC"
         self.tile_vol["val"].setText(f"{st.volume}%")
+        if hasattr(self, "vol_slider2"):
+            if int(self.vol_slider2.value()) != st.volume:
+                self.vol_slider2.blockSignals(True)
+                self.vol_slider2.setValue(st.volume)
+                self.vol_slider2.blockSignals(False)
+            self.vol_pct2.setText(f"{st.volume}%")
         self.tile_cpu["val"].setText(f"{int(st.cpu_percent)}%")
         self.tile_ram["val"].setText(f"{int(st.ram_percent)}%")
         if int(self.vol_slider.value()) != st.volume:
