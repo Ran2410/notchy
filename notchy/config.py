@@ -52,6 +52,7 @@ HUD_SUPPRESS_MS = 600     # abaikan perubahan volume sesaat setelah slider dikir
 # Prioritas 2 — cuaca / unduhan / alert baterai
 WEATHER_POLL_MS = 60_000      # cek tiap menit; fetch nyata dibatasi max_age 30 menit
 DOWNLOADS_POLL_MS = 2_000
+AUDIO_POLL_MS = 2_500
 BATTERY_LOW = 20              # toast peringatan di bawah ini
 BATTERY_REARM = 25            # izinkan peringatan lagi setelah naik di atas ini
 BATTERY_FULL = 99             # toast saat hampir penuh (sambil mengisi)

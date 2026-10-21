@@ -11,21 +11,19 @@ from .base import NowPlaying, SystemState
 class Providers:
     media: object
     system: object
+    audio_out: object
 
 
 def make_providers() -> Providers:
     if sys.platform.startswith("win"):
-        from .windows import WindowsMedia, WindowsSystem
+        from .windows import AudioOutputMonitor, WindowsMedia, WindowsSystem
 
-        return Providers(media=WindowsMedia(), system=WindowsSystem())
-    if sys.platform == "darwin":
-        # macOS belum didukung; pakai jalur Linux (MPRIS tidak ada → idle)
-        from .linux import LinuxMedia, LinuxSystem
+        return Providers(media=WindowsMedia(), system=WindowsSystem(),
+                         audio_out=AudioOutputMonitor())
+    from .linux import AudioOutputMonitor, LinuxMedia, LinuxSystem
 
-        return Providers(media=LinuxMedia(), system=LinuxSystem())
-    from .linux import LinuxMedia, LinuxSystem
-
-    return Providers(media=LinuxMedia(), system=LinuxSystem())
+    return Providers(media=LinuxMedia(), system=LinuxSystem(),
+                     audio_out=AudioOutputMonitor())
 
 
 __all__ = ["Providers", "make_providers", "NowPlaying", "SystemState"]

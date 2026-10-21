@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from .. import config as C
 from ..providers import make_providers
-from ..services import DownloadsService, WeatherService
+from ..services import DownloadsService, LyricsResult, LyricsService, WeatherService
 from ..timer import TimerController
 from .activities import Activities
 from .style import ISLAND_QSS
@@ -52,6 +52,8 @@ class IslandWindow(QWidget):
         # Prioritas 2
         self.weather = WeatherService()
         self.downloads = DownloadsService()
+        self.lyrics = LyricsService()
+        self._lyrics_track = ""
         self._bat_low_alerted = False
         self._bat_full_alerted = False
         self._last_charging = None
@@ -114,11 +116,24 @@ class IslandWindow(QWidget):
         self._poll_downloads.timeout.connect(self._do_poll_downloads)
         self._poll_downloads.start()
 
+        # monitor audio output (headset/earphone)
+        self._poll_audio = QTimer(self)
+        self._poll_audio.setInterval(C.AUDIO_POLL_MS)
+        self._poll_audio.timeout.connect(self._do_poll_audio)
+        self._poll_audio.start()
+
+        # hasil fetch lirik (thread → poll)
+        self._poll_lyrics = QTimer(self)
+        self._poll_lyrics.setInterval(600)
+        self._poll_lyrics.timeout.connect(self._do_poll_lyrics)
+        self._poll_lyrics.start()
+
         self.activities.play_pause_clicked.connect(self.providers.media.play_pause)
         self.activities.next_clicked.connect(self.providers.media.next)
         self.activities.prev_clicked.connect(self.providers.media.previous)
         self.activities.volume_changed.connect(self._on_volume_slider)
         self.activities.seek_requested.connect(self._on_seek)
+        self.activities.lyrics_seek.connect(self._on_lyrics_seek)
         self.activities.shuffle_clicked.connect(self._on_shuffle)
         self.activities.loop_clicked.connect(self._on_loop)
         self._last_np = None
@@ -127,6 +142,12 @@ class IslandWindow(QWidget):
         self._last_vol: int | None = None
         self._last_bright: int | None = None
         self._vol_set_at = 0.0  # timestamp set_volume via slider → redam HUD
+
+        # --- monitor headset/earphone (Bluetooth + jack) ---
+        try:
+            self.providers.audio_out.start()
+        except Exception:
+            pass
 
         # --- toast notifikasi desktop (Linux) ---
         self.notif_received.connect(self._on_notif)
@@ -188,6 +209,7 @@ class IslandWindow(QWidget):
 
     # ------------------------------------------------------------ animasi
     def _animate_to(self, target: float) -> None:
+        self._stop_pill_pop()
         target = 1.0 if target > 0.5 else 0.0
         if target == self._target and abs(self._t - target) < 0.001:
             return
@@ -225,6 +247,41 @@ class IslandWindow(QWidget):
         if u >= 1.0:
             self._t = self._opacity_t1
             self._opacity_timer.stop()
+
+    def _pill_pop(self) -> None:
+        """Pill sedikit membesar-mengecil (OutBack) saat headset tersambung."""
+        if self._t > 0.05 or self._pinned:
+            return
+        from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, QSequentialAnimationGroup
+
+        base = self.geometry()
+        grow = QRect(base.x() - 6, base.y() - 2,
+                     base.width() + 12, base.height() + 4)
+        seq = QSequentialAnimationGroup(self)
+        a1 = QPropertyAnimation(self, b"geometry")
+        a1.setDuration(170)
+        a1.setStartValue(base)
+        a1.setEndValue(grow)
+        a1.setEasingCurve(QEasingCurve.OutBack)
+        a2 = QPropertyAnimation(self, b"geometry")
+        a2.setDuration(240)
+        a2.setStartValue(grow)
+        a2.setEndValue(base)
+        a2.setEasingCurve(QEasingCurve.OutCubic)
+        a1.valueChanged.connect(lambda _v: self._on_anim_frame(None))
+        a2.valueChanged.connect(lambda _v: self._on_anim_frame(None))
+        seq.addAnimation(a1)
+        seq.addAnimation(a2)
+        self._pop_anim = seq
+        seq.start()
+
+    def _stop_pill_pop(self) -> None:
+        pop = getattr(self, "_pop_anim", None)
+        if pop is not None and pop.state() != QPropertyAnimation.Stopped:
+            pop.stop()
+            self._pop_anim = None
+            self.setGeometry(self._place_top_center(C.CLOSED_W, C.CLOSED_H))
+            self._layout_content(C.CLOSED_W, C.CLOSED_H)
 
     def expand(self) -> None:
         self._close_timer.stop()
@@ -334,6 +391,26 @@ class IslandWindow(QWidget):
         np = self.providers.media.refresh()
         self._last_np = np
         self.activities.update_media(np)
+        self._maybe_request_lyrics(np)
+
+    def _maybe_request_lyrics(self, np) -> None:
+        if not getattr(np, "available", False) or not np.title:
+            return
+        key = f"{np.title}|{np.artist}|{int(np.length or 0)}"
+        if key == self._lyrics_track:
+            return
+        self._lyrics_track = key
+        self.lyrics.request(np)
+        self.activities.set_lyrics(LyricsResult(
+            status="loading", title=np.title, artist=np.artist or ""))
+
+    def _do_poll_lyrics(self) -> None:
+        res = self.lyrics.poll()
+        if res is not None:
+            self.activities.set_lyrics(res)
+
+    def _on_lyrics_seek(self, seconds: float) -> None:
+        self.providers.media.seek(seconds)
 
     def _on_seek(self, frac: float) -> None:
         np = self._last_np
@@ -404,6 +481,26 @@ class IslandWindow(QWidget):
     def _do_poll_weather(self) -> None:
         self.weather.refresh_async()
         self.activities.update_weather(self.weather.data)
+
+    def _do_poll_audio(self) -> None:
+        try:
+            events = self.providers.audio_out.poll()
+        except Exception:
+            return
+        for kind, label in events:
+            self._on_audio_event(kind, label)
+
+    def _on_audio_event(self, kind: str, label: str) -> None:
+        if kind == "plug":
+            text = f"Headset tersambung · {label}"
+        else:
+            text = f"Headset dicabut · {label}"
+        if self._t > 0.5:
+            # panel sedang terbuka → cukup flash di footer, jangan ganggu tab
+            self.activities.flash_footer(text)
+        else:
+            self.activities.headset_event(kind, label)
+            self._pill_pop()
 
     def _do_poll_downloads(self) -> None:
         self.downloads.scan()

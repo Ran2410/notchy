@@ -6,6 +6,7 @@ VolumeManager → amixer, BatteryActivityManager → power_supply.
 from __future__ import annotations
 
 import glob
+import json
 import os
 import threading
 import re
@@ -313,5 +314,247 @@ class NotificationMonitor:
                 body = str(args[4] or "").strip()
                 if summary or body:
                     self._callback(summary, body)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- audio out
+AUDIO_UUIDS = (
+    "0000110b",  # A2DP Audio Sink
+    "0000110a",  # A2DP Audio Source
+    "00001108",  # Headset
+    "0000111e",  # Handsfree
+    "0000110e",  # AVRCP
+)
+
+
+class AudioOutputMonitor:
+    """Deteksi headset/earphone tersambung.
+
+    - Bluetooth: sinyal BlueZ (org.bluez.Device1.Connected) di system bus
+    - Kabel 3.5mm: polling ALSA jack ("Headphone Jack: on/off");
+      fallback nama sink PulseAudio/PipeWire bila pactl tersedia
+    Event dikumpulkan di antrean; UI memanggil poll() secara periodik.
+    """
+
+    def __init__(self) -> None:
+        self._events: list[tuple[str, str]] = []
+        self._lock = threading.Lock()
+        self._stop = False
+        self._thread = None
+        self._jack_state: bool | None = None
+        self._sink_set: set[str] | None = None
+        self._last_sink: str | None = None
+
+    # ------------------------------------------------------------ start/stop
+    def start(self) -> None:
+        if not dbus:
+            return
+        self._thread = threading.Thread(target=self._bt_loop, daemon=True, name="notchy-bt")
+        self._thread.start()
+        # baseline agar tidak memicu event saat start
+        self._jack_state = self._read_pipewire_jack()
+        if self._jack_state is None:
+            self._jack_state = self._read_jack()
+        self._sink_set = self._read_sink_set()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def _push(self, kind: str, label: str) -> None:
+        with self._lock:
+            self._events.append((kind, label))
+
+    def poll(self) -> list[tuple[str, str]]:
+        """Dipanggil dari timer UI: baca status jack + set sink, kembalikan event."""
+        # 1) status jack: PipeWire dulu (akurat di sistem modern), ALSA fallback
+        dump = self._pw_dump()
+        pw_jack = self._read_pipewire_jack(dump) if dump is not None else None
+        jack = pw_jack if pw_jack is not None else self._read_jack()
+        if jack is not None:
+            if self._jack_state is None:
+                self._jack_state = jack
+            elif jack != self._jack_state:
+                self._jack_state = jack
+                self._push("plug" if jack else "unplug", "Jack 3.5mm")
+
+        # 2) USB headset: perubahan daftar sink (tambah/hilang)
+        sinks = self._read_sink_set(dump) if dump is not None else self._read_sink_set(None)
+        if sinks is not None:
+            if self._sink_set is None:
+                self._sink_set = sinks
+            elif sinks != self._sink_set:
+                added = sinks - self._sink_set
+                removed = self._sink_set - sinks
+                self._sink_set = sinks
+                for name in added:
+                    if self._is_headset_name(name):
+                        self._push("plug", name)
+                for name in removed:
+                    if self._is_headset_name(name):
+                        self._push("unplug", "Speaker")
+
+        with self._lock:
+            events = self._events
+            self._events = []
+        return events
+
+    # ------------------------------------------------------------ jack ALSA
+    @staticmethod
+    def _read_jack() -> bool | None:
+        try:
+            out = subprocess.run(
+                ["amixer", "contents"], capture_output=True, text=True, timeout=1.2
+            ).stdout
+        except Exception:
+            return None
+        current = ""
+        state: bool | None = None
+        for line in out.splitlines():
+            m = re.search(r"name='([^']+)'", line)
+            if m:
+                current = m.group(1).lower()
+            if "values=" in line and current and (
+                "headphone" in current or "headset" in current or "headphone jack" in current
+            ):
+                val = line.split("values=", 1)[1].strip().lower()
+                state = ("on" in val) if val else None
+        return state
+
+    # ------------------------------------------------------------ PipeWire
+    @staticmethod
+    def _pw_dump() -> list | None:
+        import shutil
+
+        if not shutil.which("pw-dump"):
+            return None
+        try:
+            out = subprocess.run(
+                ["pw-dump"], capture_output=True, text=True, timeout=2.5
+            ).stdout
+            return json.loads(out)
+        except Exception:
+            return None
+
+    def _read_pipewire_jack(self, data=None) -> bool | None:
+        """Status headphone dari route PipeWire ('available': yes/no)."""
+        if data is None:
+            data = self._pw_dump()
+        if data is None:
+            return None
+        state: bool | None = None
+        for obj in data:
+            info = obj.get("info") or {}
+            props = info.get("props") or {}
+            if props.get("media.class") != "Audio/Device":
+                continue
+            params = info.get("params") or {}
+            for key in ("EnumRoute", "Route"):
+                for route in params.get(key) or []:
+                    if str(route.get("direction", "")).lower() != "output":
+                        continue
+                    name = str(route.get("name", "")).lower()
+                    if "headphone" not in name and "headset" not in name:
+                        continue
+                    avail = str(route.get("available", "")).lower()
+                    if avail in ("yes", "no"):
+                        state = (avail == "yes")
+        return state
+
+    def _read_sink_set(self, data=None) -> set[str] | None:
+        if data is None:
+            data = self._pw_dump()
+        if data is not None:
+            names: set[str] = set()
+            for obj in data:
+                info = obj.get("info") or {}
+                props = info.get("props") or {}
+                if props.get("media.class") == "Audio/Sink":
+                    nm = props.get("node.name") or props.get("node.description") or ""
+                    if nm:
+                        names.add(str(nm))
+            return names
+        # fallback pactl
+        import shutil
+
+        if not shutil.which("pactl"):
+            return None
+        try:
+            out = subprocess.run(
+                ["pactl", "list", "short", "sinks"], capture_output=True, text=True, timeout=1.5
+            ).stdout
+            names = set()
+            for line in out.splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    names.add(parts[1])
+            return names
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------ pactl sink
+    @staticmethod
+    def _read_sink_name() -> str | None:
+        import shutil
+
+        if not shutil.which("pactl"):
+            return None
+        try:
+            out = subprocess.run(
+                ["pactl", "info"], capture_output=True, text=True, timeout=1.2
+            ).stdout
+            for line in out.splitlines():
+                if line.lower().startswith("default sink"):
+                    return line.split(":", 1)[1].strip()
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _is_headset_name(name: str) -> bool:
+        low = (name or "").lower()
+        return any(k in low for k in (
+            "headphone", "headset", "earbud", "airpod", "buds", "bluetooth",
+            "wh-", "wf-", "jabra", "sony", "bose", "sennheiser",
+        ))
+
+    # ------------------------------------------------------------ BlueZ D-Bus
+    def _bt_loop(self) -> None:
+        try:
+            bus = dbus.SystemBus()
+            bus.add_match_string(
+                "type='signal',interface='org.freedesktop.DBus.Properties',"
+                "member='PropertiesChanged',path_namespace='/org/bluez'"
+            )
+            bus.add_message_filter(self._on_bt_message)
+            while not self._stop:
+                bus.process(0.25)
+        except Exception:
+            return
+
+    def _on_bt_message(self, bus, msg) -> None:
+        try:
+            args = msg.get_args_list()
+            if len(args) < 2:
+                return
+            interface = str(args[0])
+            changed = args[1]
+            if interface != "org.bluez.Device1" or "Connected" not in changed:
+                return
+            connected = bool(changed.get("Connected"))
+            name = str(changed.get("Name") or changed.get("Alias") or "Perangkat Bluetooth")
+            uuids = changed.get("UUIDs")
+            if uuids is None:
+                try:
+                    props = dbus.Interface(bus.get_object("org.bluez", msg.get_path()),
+                                           "org.freedesktop.DBus.Properties")
+                    uuids = props.Get("org.bluez.Device1", "UUIDs")
+                except Exception:
+                    uuids = []
+            uuid_txt = " ".join(str(u).lower() for u in (uuids or []))
+            is_audio = any(u in uuid_txt for u in AUDIO_UUIDS)
+            if not is_audio:
+                return
+            self._push("plug" if connected else "unplug", f"{name}")
         except Exception:
             pass

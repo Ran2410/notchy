@@ -54,7 +54,11 @@ klik kanan → Quit · slider volume langsung bekerja.
   dengan animasi slide-out/slide-in (OutCubic):
   - **♪ Musik** — kartu hero (thumbnail album 88px, judul, chips sumber/album/status),
     **progress seekable** (klik untuk lompat posisi), kontrol transport +
-    **shuffle ⇄** + **repeat ↻**, waveform besar.
+    **shuffle ⇄** + **repeat ↻**, waveform besar, dan tombol **LIRIK**.
+    **Lirik tersinkron** (LRCLIB): panel terbelah — pemutar ringkas di kiri,
+    lirik di kanan; baris aktif menyala & auto-scroll, klik baris untuk seek.
+    Auto-scroll hanya jalan bila baris aktif keluar layar dan **menghormati
+    scroll manual** (ditahan 6 detik), jadi tidak menarik paksa ke atas.
     Tombol shuffle/repeat otomatis **nonaktif** bila pemutar tidak mendukung
     (mis. YouTube di Chrome tidak mengekspos `Shuffle`/`LoopStatus` di MPRIS —
     gunakan Spotify/VLC/mpv untuk fitur itu; seek & transport tetap jalan)
@@ -75,6 +79,16 @@ klik kanan → Quit · slider volume langsung bekerja.
   (`.part`/`.crdownload`/ukuran membesar), toast saat mulai & selesai
 - **Alert baterai** — toast saat mulai mengisi, daya dicabut, baterai lemah
   (≤20%, sekali per sesi), dan hampir penuh (≥99%)
+- **Deteksi headset/earphone** — Bluetooth via sinyal BlueZ
+  (`org.bluez.Device1.Connected`, difilter UUID audio) + jack 3.5mm via
+  **status route PipeWire** (`analog-output-headphones: available=yes/no`,
+  dibaca dari `pw-dump`) dengan fallback kontrol jack ALSA dan nama sink
+  `pactl`; USB headset terdeteksi dari sink yang muncul/hilang.
+  Windows memantau perangkat output default (pycaw).
+  Diagnostik: `./.venv/bin/python scripts/audio_probe.py` Saat colok/cabut, pill menampilkan animasi:
+  pill **pop** (OutBack), **kilau menyapu**, **headphone menggambar diri**
+  mengelilingi logo, **sonar rings**, glow, halo, dan **waveform "pop"** sekali.
+  Bila panel sedang terbuka, pesan cukup muncul di footer tanpa pindah tab.
 - **Animasi** —
   - morph pill ↔ panel (geometry OutCubic 280 ms) + radius otomatis
   - tab: slide-out/in + flash halus judul tab
@@ -110,8 +124,8 @@ notchy/config.py            design token + geometri + timing
 notchy/art.py               fetch & thumbnail album art (file/http/data URI)
 notchy/providers/
     base.py                 dataclass NowPlaying/SystemState
-    linux.py                MPRIS + amixer + /sys + /proc
-    windows.py              SMTC (winsdk) + pycaw + psutil
+    linux.py                MPRIS + amixer + /sys + /proc + AudioOutputMonitor
+    windows.py              SMTC (winsdk) + pycaw + psutil + AudioOutputMonitor
 notchy/ui/
     island.py               window, animasi morph, hover/close, HUD & toast wiring
     activities.py           compact pill ↔ expanded bertab (Musik/Sistem) + sneak-peek

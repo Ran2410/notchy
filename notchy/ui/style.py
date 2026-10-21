@@ -147,6 +147,24 @@ ISLAND_QSS = f"""
 #ag-title {{ color: {C.TEXT}; font-weight: 600; font-size: 13px; font-family: Sans; }}
 #dl-name {{ color: {C.TEXT}; font-weight: 600; font-size: 12px; font-family: Sans; }}
 #c-temp {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: Sans; }}
+#h-title2 {{ color: {C.TEXT}; font-weight: 700; font-size: 12px; font-family: Sans; }}
+#lyric-line {{
+    color: {C.TEXT_DIM};
+    font-weight: 500; font-size: 12px; font-family: Sans;
+    padding: 2px 0;
+}}
+#lyrics-scroll, #lyrics-scroll QWidget,
+#lyrics-scroll QWidget#qt_scrollarea_viewport {{ background: transparent; }}
+#lyrics-scroll {{ border: none; }}
+#lyrics-scroll QScrollBar:vertical {{
+    background: transparent; width: 6px; margin: 0;
+}}
+#lyrics-scroll QScrollBar::handle:vertical {{
+    background: rgba(255,255,255,0.18); border-radius: 3px; min-height: 20px;
+}}
+#lyrics-scroll QScrollBar::add-line:vertical,
+#lyrics-scroll QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollArea {{ background: transparent; }}
 #h-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: Sans; }}
 #h-temp {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: Sans; }}
 #ag-row {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: Sans; }}

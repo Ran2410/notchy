@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import os
 import random
+import time
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QStackedWidget,
@@ -75,6 +77,126 @@ ASSETS_DIR = os.path.normpath(os.path.join(
 LOGO_ICON = os.path.join(ASSETS_DIR, "notchy-icon.png")
 
 
+class EventOverlay(QWidget):
+    """Efek 'wow' event headset: sonar rings + kilau sapuan + headphone
+    yang menggambar diri mengelilingi logo. Digambar manual (QPainter),
+    tanpa QGraphicsEffect agar tidak bentrok dengan effect milik parent."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self._kind = "plug"
+        self._u = 0.0
+        self._start = 0.0
+        self._dur = 2.4
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._tick)
+        self.hide()
+
+    def play(self, kind: str, ms: int = 2400) -> None:
+        self._kind = kind
+        self._start = time.monotonic()
+        self._dur = max(0.4, ms / 1000.0)
+        self._u = 0.0
+        self._timer.start()
+        self.show()
+        self.raise_()
+        self.update()
+
+    def _tick(self) -> None:
+        u = (time.monotonic() - self._start) / self._dur
+        if u >= 1.0:
+            self._timer.stop()
+            self.hide()
+            return
+        self._u = u
+        self.update()
+
+    @staticmethod
+    def _accent(kind: str):
+        from PySide6.QtGui import QColor
+
+        return QColor(110, 139, 255) if kind == "plug" else QColor(255, 107, 157)
+
+    def paintEvent(self, ev) -> None:
+        if self._u <= 0.0:
+            return
+        from PySide6.QtCore import QPointF, QRectF, Qt
+        from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QRadialGradient
+
+        u = self._u
+        w, h = self.width(), self.height()
+        accent = self._accent(self._kind)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        # 1) kilau menyapu sepanjang pill
+        direction = 1.0 if self._kind == "plug" else -1.0
+        pos = (-0.25 + u * 1.5) if direction > 0 else (1.25 - u * 1.5)
+        gx = pos * w
+        grad = QLinearGradient(gx - 70, 0, gx + 70, 0)
+        grad.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+        grad.setColorAt(0.5, QColor(accent.red(), accent.green(), accent.blue(), 42))
+        grad.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+        p.fillRect(0, 0, w, h, grad)
+
+        # 2) sonar rings dari logo
+        cx, cy = 25.0, h / 2.0
+        for i in range(3):
+            tt = (u * 1.9 + i * 0.27) % 1.0
+            r = 10.0 + tt * 72.0
+            a = int(150 * (1.0 - tt))
+            pen = QPen(QColor(accent.red(), accent.green(), accent.blue(), a), 1.6)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), r, r)
+
+        # 3) headphone menggambar diri mengelilingi logo (wipe reveal)
+        reveal = min(1.0, u / 0.42)
+        p.save()
+        from PySide6.QtCore import QRectF as _R
+        p.setClipRect(_R(0, 0, 14 + 34 * reveal, h))
+        self._draw_headphone(p, cx, cy, accent)
+        p.restore()
+
+        # 4) glow lembut di belakang logo
+        pulse = max(0.0, 1.0 - abs(u * 2.4 - 0.6))
+        if pulse > 0.01:
+            rg = QRadialGradient(cx, cy, 42)
+            rg.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(),
+                                      int(120 * pulse)))
+            rg.setColorAt(1.0, QColor(accent.red(), accent.green(), accent.blue(), 0))
+            p.setPen(Qt.NoPen)
+            p.setBrush(rg)
+            p.drawEllipse(QPointF(cx, cy), 42, 42)
+
+        p.end()
+
+    @staticmethod
+    def _draw_headphone(p, cx: float, cy: float, accent) -> None:
+        import math as _m
+
+        from PySide6.QtCore import QPointF as _P, QRectF as _R, Qt as _Qt
+        from PySide6.QtGui import QPainterPath as _Path, QPen as _Pen, QColor as _C
+
+        r = 12.5
+        pen = _Pen(accent, 2.6)
+        pen.setCapStyle(_Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(_Qt.NoBrush)
+        rect = _R(cx - r, cy - r, 2 * r, 2 * r)
+        p.drawArc(rect, 200 * 16, -220 * 16)
+        p.setPen(_Qt.NoPen)
+        p.setBrush(_C(accent.red(), accent.green(), accent.blue(), 235))
+        for ang in (200.0, -20.0):
+            rad = _m.radians(ang)
+            x = cx + r * _m.cos(rad)
+            y = cy - r * _m.sin(rad)
+            p.drawRoundedRect(_R(x - 2.8, y - 4.6, 5.6, 9.2), 2.4, 2.4)
+
+
 class Activities(QWidget):
     volume_changed = Signal(int)
     play_pause_clicked = Signal()
@@ -83,6 +205,7 @@ class Activities(QWidget):
     seek_requested = Signal(float)      # 0..1 dari progress bar
     shuffle_clicked = Signal()
     loop_clicked = Signal()
+    lyrics_seek = Signal(float)         # detik absolut dari klik baris lirik
 
     def __init__(self, timer=None, parent=None) -> None:
         super().__init__(parent)
@@ -113,6 +236,8 @@ class Activities(QWidget):
         self.compact.setParent(self)
         self.expanded.setParent(self)
 
+        self._fx = EventOverlay(self)
+
         self._compact_fx = QGraphicsOpacityEffect(self.compact)
         self.compact.setGraphicsEffect(self._compact_fx)
         self._expanded_fx = QGraphicsOpacityEffect(self.expanded)
@@ -141,6 +266,11 @@ class Activities(QWidget):
         self._dl_marquee_t.setInterval(40)
         self._dl_marquee_t.timeout.connect(self._dl_marquee_tick)
 
+        self._lyrics_tick_t = QTimer(self)
+        self._lyrics_tick_t.setInterval(250)
+        self._lyrics_tick_t.timeout.connect(self._lyrics_tick)
+        self._lyrics_tick_t.start()
+
         self._timer_blink_t = QTimer(self)
         self._timer_blink_t.setInterval(550)
         self._timer_blink_on = False
@@ -152,6 +282,38 @@ class Activities(QWidget):
                 "toast", f"{self.timer.label} selesai", "⏱", C.TOAST_MS, 30))
 
         self.set_opacity_for(0.0)
+
+    def _note_icons(self, height: int = 13, count: int = 3):
+        """Deretan ikon not balok untuk baris lirik kosong (instrumental)."""
+        key = (height, count)
+        cached = getattr(self, "_note_pm_cache", None)
+        if cached and cached[0] == key:
+            return cached[1], cached[2]
+        from PySide6.QtGui import QColor, QPainter
+
+        pm0 = QPixmap(os.path.join(ASSETS_DIR, "music-icon.png"))
+        if pm0.isNull():
+            return None, None
+        icon = pm0.scaledToHeight(height, Qt.SmoothTransformation)
+        gap = 7
+        total_w = count * icon.width() + (count - 1) * gap
+
+        def compose(color: "QColor") -> "QPixmap":
+            out = QPixmap(total_w, height)
+            out.fill(Qt.transparent)
+            p = QPainter(out)
+            for i in range(count):
+                p.drawPixmap(i * (icon.width() + gap), 0, icon)
+            p.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            p.fillRect(out.rect(), color)
+            p.end()
+            return out
+
+        # QColor(155,155,170,190) — light gray lembut; aktif biru sama dgn teks lirik
+        dim = compose(QColor(155, 155, 170, 190))
+        active = compose(QColor(110, 139, 255, 255))
+        self._note_pm_cache = (key, dim, active)
+        return dim, active
 
     def _logo_pixmap(self, height: int) -> QPixmap:
         pm = QPixmap(LOGO_ICON)
@@ -302,7 +464,7 @@ class Activities(QWidget):
         return box
 
     # ============================================================ PAGE: MUSIK
-    def _build_page_music(self) -> QWidget:
+    def _build_music_normal(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -431,6 +593,20 @@ class Activities(QWidget):
         self.btn_loop.setProperty("media_action", "loop")
         ctl_row.addWidget(self.btn_loop)
 
+        self.btn_lyrics = QLabel()
+        self.btn_lyrics.setObjectName("toggle-btn")
+        self.btn_lyrics.setAlignment(Qt.AlignCenter)
+        self.btn_lyrics.setFixedSize(40, 32)
+        self.btn_lyrics.setToolTip("Tampilkan lirik tersinkron")
+        self.btn_lyrics.installEventFilter(self)
+        self.btn_lyrics.setProperty("lyrics_toggle", True)
+        _pm = QPixmap(os.path.join(ASSETS_DIR, "lyrics-icon.png"))
+        if not _pm.isNull():
+            self.btn_lyrics.setPixmap(_pm.scaledToHeight(17, Qt.SmoothTransformation))
+        else:
+            self.btn_lyrics.setText("LIRIK")
+        ctl_row.addWidget(self.btn_lyrics)
+
         ctl_row.addStretch(1)
         lay.addLayout(ctl_row)
 
@@ -450,6 +626,298 @@ class Activities(QWidget):
 
         lay.addStretch(1)
         return page
+
+    def _build_page_music(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        self.music_stack = QStackedWidget()
+        self.music_stack.addWidget(self._build_music_normal())
+        self.music_stack.addWidget(self._build_music_lyrics())
+        lay.addWidget(self.music_stack)
+        return page
+
+    # ============================================================ LIRIK
+    def _build_music_lyrics(self) -> QWidget:
+        page = QWidget()
+        lay = QHBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(12)
+
+        # ---- kiri: pemutar ringkas ----
+        left = QWidget()
+        left.setFixedWidth(176)
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+        lv.setSpacing(8)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        self.art2 = QLabel("♪")
+        self.art2.setFixedSize(56, 56)
+        self.art2.setAlignment(Qt.AlignCenter)
+        self.art2.setStyleSheet(
+            f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
+            f" stop:1 #7C5CFF); border-radius: 12px; color: rgba(255,255,255,0.85);"
+            f" font-weight: 700; font-size: 20px; font-family: Sans;")
+        top.addWidget(self.art2)
+
+        meta = QVBoxLayout()
+        meta.setSpacing(2)
+        self.title2 = ElidedLabel("—")
+        self.title2.setObjectName("h-title2")
+        self.artist2 = ElidedLabel("")
+        self.artist2.setObjectName("t-tiny")
+        meta.addWidget(self.title2)
+        meta.addWidget(self.artist2)
+        meta.addStretch(1)
+        top.addLayout(meta, 1)
+        lv.addLayout(top)
+
+        self.scrub2 = QFrame()
+        self.scrub2.setObjectName("scrub")
+        self.scrub2.setFixedHeight(5)
+        self.scrub2_fill = QFrame(self.scrub2)
+        self.scrub2_fill.setObjectName("scrub-fill")
+        self.scrub2_fill.setGeometry(0, 0, 0, 5)
+        lv.addWidget(self.scrub2)
+
+        times2 = QHBoxLayout()
+        self.time2_now = QLabel("0:00")
+        self.time2_now.setObjectName("t-tiny")
+        self.time2_len = QLabel("0:00")
+        self.time2_len.setObjectName("t-tiny")
+        times2.addWidget(self.time2_now)
+        times2.addStretch(1)
+        times2.addWidget(self.time2_len)
+        lv.addLayout(times2)
+
+        seg2 = QFrame()
+        seg2.setObjectName("seg")
+        sl2 = QHBoxLayout(seg2)
+        sl2.setContentsMargins(2, 2, 2, 2)
+        sl2.setSpacing(0)
+        for label, sig, tip in (
+            ("⏮", self.prev_clicked, "Sebelumnya"),
+            ("⏯", self.play_pause_clicked, "Play / Pause"),
+            ("⏭", self.next_clicked, "Berikutnya"),
+        ):
+            btn = QLabel(label)
+            btn.setObjectName("seg-btn")
+            btn.setAlignment(Qt.AlignCenter)
+            btn.setFixedSize(44, 30)
+            btn.setToolTip(tip)
+            btn.installEventFilter(self)
+            btn.setProperty("sig", sig)
+            sl2.addWidget(btn)
+        lv.addWidget(seg2)
+
+        self.btn_back = QLabel()
+        self.btn_back.setObjectName("toggle-btn")
+        self.btn_back.setAlignment(Qt.AlignCenter)
+        self.btn_back.setFixedSize(40, 32)
+        self.btn_back.setToolTip("Kembali ke pemutar musik")
+        self.btn_back.installEventFilter(self)
+        self.btn_back.setProperty("lyrics_toggle", True)
+        _pmb = QPixmap(os.path.join(ASSETS_DIR, "music-icon.png"))
+        if not _pmb.isNull():
+            self.btn_back.setPixmap(_pmb.scaledToHeight(18, Qt.SmoothTransformation))
+        else:
+            self.btn_back.setText("‹ Musik")
+        lv.addWidget(self.btn_back)
+        lv.addStretch(1)
+
+        lay.addWidget(left)
+
+        # ---- kanan: daftar lirik ----
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(6)
+
+        rhead = QHBoxLayout()
+        rtag = QLabel("LIRIK")
+        rtag.setObjectName("info-tag")
+        rhead.addWidget(rtag)
+        rhead.addStretch(1)
+        self.lyrics_state = QLabel("")
+        self.lyrics_state.setObjectName("t-tiny")
+        rhead.addWidget(self.lyrics_state)
+        rv.addLayout(rhead)
+
+        self.lyrics_scroll = QScrollArea()
+        self.lyrics_scroll.setWidgetResizable(True)
+        self.lyrics_scroll.setFrameShape(QFrame.NoFrame)
+        self.lyrics_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lyrics_scroll.setObjectName("lyrics-scroll")
+        self.lyrics_scroll.viewport().setAutoFillBackground(False)
+        self.lyrics_scroll.setStyleSheet("background: transparent;")
+        self.lyrics_content = QWidget()
+        self.lyrics_content.setAttribute(Qt.WA_StyledBackground, True)
+        self.lyrics_content.setStyleSheet("background: transparent;")
+        self.lyrics_layout = QVBoxLayout(self.lyrics_content)
+        self.lyrics_layout.setContentsMargins(0, 4, 8, 4)
+        self.lyrics_layout.setSpacing(6)
+        self.lyrics_layout.addStretch(1)
+        self.lyrics_scroll.setWidget(self.lyrics_content)
+        self._scroll_programmatic = False
+        self._user_scroll_until = 0.0
+        self.lyrics_scroll.verticalScrollBar().valueChanged.connect(
+            self._on_lyrics_scrolled)
+        rv.addWidget(self.lyrics_scroll, 1)
+
+        lay.addWidget(right, 1)
+
+        # state
+        self._lyrics_mode = False
+        self._lyric_labels = []      # [(waktu, QLabel)]
+        self._lyrics_synced = False
+        self._lyric_idx = -1
+        self._pos_base = 0.0
+        self._pos_t = 0.0
+        self._pos_playing = False
+        return page
+
+    # ------------------------------------------------------------ lirik API
+    def set_lyrics(self, result) -> None:
+        # abaikan konten identik (hindari rebuild + reset scroll)
+        sig = (bool(getattr(result, "synced", False)),
+               tuple(getattr(result, "lines", []) or []),
+               getattr(result, "status", ""))
+        if sig == getattr(self, "_lyrics_sig", None):
+            return
+        self._lyrics_sig = sig
+        # bersihkan baris lama
+        while self.lyrics_layout.count():
+            item = self.lyrics_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._lyric_labels = []
+        self._lyric_idx = -1
+        self._user_scroll_until = 0.0
+        try:
+            self._scroll_programmatic = True
+            self.lyrics_scroll.verticalScrollBar().setValue(0)
+        finally:
+            self._scroll_programmatic = False
+        self._lyrics_synced = bool(getattr(result, "synced", False))
+        lines = getattr(result, "lines", []) or []
+        status = getattr(result, "status", "")
+
+        if status == "loading":
+            self.lyrics_state.setText("memuat…")
+        elif not lines:
+            self.lyrics_state.setText("tidak tersedia")
+        else:
+            self.lyrics_state.setText(
+                f"{getattr(result, 'artist', '')} · {getattr(result, 'title', '')}")
+
+        if not lines:
+            hint = QLabel("Lirik belum tersedia untuk lagu ini." if status != "loading"
+                          else "Sedang mencari lirik…")
+            hint.setObjectName("lyric-line")
+            hint.setWordWrap(True)
+            self.lyrics_layout.addWidget(hint)
+            self.lyrics_layout.addStretch(1)
+            return
+
+        dim_pm, _active_pm = self._note_icons(13, 3)
+        for idx, (t, text) in enumerate(lines):
+            lbl = QLabel()
+            lbl.setObjectName("lyric-line")
+            is_note = not (text or "").strip()
+            if is_note and dim_pm is not None:
+                lbl.setPixmap(dim_pm)
+                lbl.setProperty("is_note", True)
+                lbl.setFixedHeight(18)
+                lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            else:
+                lbl.setText(text or " ")
+                lbl.setWordWrap(True)
+            lbl.setProperty("lyric_time", float(t))
+            lbl.setProperty("lyric_idx", idx)
+            if self._lyrics_synced:
+                lbl.setCursor(Qt.PointingHandCursor)
+                lbl.installEventFilter(self)
+            self.lyrics_layout.addWidget(lbl)
+            self._lyric_labels.append(lbl)
+        self.lyrics_layout.addStretch(1)
+
+    def _on_lyrics_scrolled(self, _value: int) -> None:
+        # scroll manual user → tahan auto-scroll sementara (6 dtk)
+        if not getattr(self, "_scroll_programmatic", False):
+            self._user_scroll_until = time.monotonic() + 6.0
+
+    def _ensure_line_visible(self, lbl) -> None:
+        """Geser hanya bila baris aktif keluar viewport (bukan selalu center)."""
+        from PySide6.QtCore import QPoint as _QPoint
+
+        bar = self.lyrics_scroll.verticalScrollBar()
+        vp = self.lyrics_scroll.viewport()
+        y = lbl.mapTo(self.lyrics_content, _QPoint(0, 0)).y()
+        line_h = max(1, lbl.height())
+        top = bar.value()
+        bottom = top + vp.height()
+        margin = 20
+        if y < top + margin or (y + line_h) > bottom - margin:
+            target = max(0, y - vp.height() // 3)
+            try:
+                self._scroll_programmatic = True
+                bar.setValue(target)
+            finally:
+                self._scroll_programmatic = False
+
+    def toggle_lyrics(self) -> None:
+        self._lyrics_mode = not self._lyrics_mode
+        self.music_stack.setCurrentIndex(1 if self._lyrics_mode else 0)
+        # state aktif pada tombol ikon
+        if self._lyrics_mode:
+            self.btn_lyrics.setStyleSheet(
+                "background: rgba(110,139,255,0.35); border-radius: 16px;")
+        else:
+            self.btn_lyrics.setStyleSheet("")
+
+    def _current_pos(self) -> float:
+        if self._pos_playing:
+            return self._pos_base + (time.monotonic() - self._pos_t)
+        return self._pos_base
+
+    def _lyrics_tick(self) -> None:
+        if not self._lyrics_mode or not self._lyrics_synced or not self._lyric_labels:
+            return
+        pos = self._current_pos()
+        idx = -1
+        for i, (t, _txt) in enumerate(
+                [self._lyric_time_of(lbl) for lbl in self._lyric_labels]):
+            if pos >= t:
+                idx = i
+            else:
+                break
+        if idx != self._lyric_idx:
+            dim_pm, active_pm = self._note_icons(13, 3)
+            if 0 <= self._lyric_idx < len(self._lyric_labels):
+                prev = self._lyric_labels[self._lyric_idx]
+                if prev.property("is_note") and dim_pm is not None:
+                    prev.setPixmap(dim_pm)
+                else:
+                    prev.setStyleSheet("")
+            self._lyric_idx = idx
+            if idx >= 0:
+                lbl = self._lyric_labels[idx]
+                if lbl.property("is_note") and active_pm is not None:
+                    lbl.setPixmap(active_pm)
+                else:
+                    lbl.setStyleSheet(
+                        "color: #6E8BFF; font-weight: 700;")
+                # jangan tarik posisi bila user sedang scroll manual
+                if time.monotonic() > getattr(self, "_user_scroll_until", 0.0):
+                    self._ensure_line_visible(lbl)
+
+    def _lyric_time_of(self, lbl) -> tuple[float, str]:
+        return (float(lbl.property("lyric_time") or 0.0), lbl.text())
 
     # ============================================================ PAGE: SISTEM
     def _build_page_system(self) -> QWidget:
@@ -899,6 +1367,25 @@ class Activities(QWidget):
             if delta:
                 self.switch_tab(delta)
             return True
+        # toggle tampilan lirik
+        if ev.type() == ev.Type.MouseButtonRelease and obj.property("lyrics_toggle"):
+            self.toggle_lyrics()
+            return True
+        # klik baris lirik → seek
+        if (ev.type() == ev.Type.MouseButtonRelease
+                and obj.property("lyric_time") is not None
+                and getattr(self, "_lyrics_synced", False)):
+            try:
+                t_sec = float(obj.property("lyric_time"))
+            except (TypeError, ValueError):
+                t_sec = -1.0
+            if t_sec >= 0:
+                self.lyrics_seek.emit(t_sec)
+                self._pos_base = t_sec
+                self._pos_t = time.monotonic()
+                self._lyric_idx = -1
+                self._user_scroll_until = 0.0
+            return True
         # shuffle / loop
         if ev.type() == ev.Type.MouseButtonRelease and obj.property("media_action"):
             action = str(obj.property("media_action"))
@@ -1016,6 +1503,10 @@ class Activities(QWidget):
         ch = 24
         self.compact.setGeometry(0, max(0, (h - ch) // 2), w, ch)
         self.expanded.setGeometry(0, 0, w, max(h, C.OPEN_H - 24))
+        if hasattr(self, "_fx"):
+            self._fx.setGeometry(0, 0, w, h)
+            if self._fx.isVisible():
+                self._fx.raise_()
 
     # ------------------------------------------------------------ update
     def _set_thumb(self, path: str, url: str) -> None:
@@ -1026,9 +1517,14 @@ class Activities(QWidget):
         img = art_loader.load_thumbnail(path, self._art_size, radius=16)
         if img is None:
             return
-        self.art_label.setPixmap(QPixmap.fromImage(img))
+        pix = QPixmap.fromImage(img)
+        self.art_label.setPixmap(pix)
         self.art_label.setText("")
         self.art_label.setStyleSheet("background: transparent;")
+        if hasattr(self, "art2"):
+            self.art2.setPixmap(pix.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.art2.setText("")
+            self.art2.setStyleSheet("background: transparent;")
         self._art_loaded_url = url
 
     def _art_fallback(self, color: str) -> None:
@@ -1042,6 +1538,18 @@ class Activities(QWidget):
             self.art_label.setPixmap(pm)
         else:
             self.art_label.setText("♪")
+        if hasattr(self, "art2"):
+            pm2 = self._logo_pixmap(34)
+            self.art2.clear()
+            if not pm2.isNull():
+                self.art2.setPixmap(pm2)
+                self.art2.setStyleSheet("background: transparent;")
+            else:
+                self.art2.setText("♪")
+                self.art2.setStyleSheet(
+                    f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
+                    f" stop:1 #7C5CFF); border-radius: 12px; color: rgba(255,255,255,0.85);"
+                    f" font-weight: 700; font-size: 20px; font-family: Sans;")
         self._art_loaded_url = ""
 
     def _update_art(self, art_url: str) -> None:
@@ -1060,6 +1568,9 @@ class Activities(QWidget):
     def update_media(self, np) -> None:
         self._has_media = bool(np.available and np.title)
         self._playing = bool(np.playing)
+        self._pos_base = float(getattr(np, "position", 0.0) or 0.0)
+        self._pos_t = time.monotonic()
+        self._pos_playing = self._playing
         if self._has_media:
             label = np.title if not np.artist else f"{np.title} — {np.artist}"
             # sneak-peek saat lagu berganti (padanan sneakPeekEvent)
@@ -1073,6 +1584,11 @@ class Activities(QWidget):
             self.time_now.setText(fmt_time(np.position))
             self.time_len.setText(fmt_time(np.length))
             self._set_scrub(np.progress or 0.0)
+            if hasattr(self, "title2"):
+                self.title2.set_full_text(np.title or "(no title)")
+                self.artist2.set_full_text(np.artist or np.album or np.identity or "")
+                self.time2_now.setText(fmt_time(np.position))
+                self.time2_len.setText(fmt_time(np.length))
             if np.playing and not self._badge_pulse_t.isActive():
                 self._badge_pulse_t.start()
             elif not np.playing:
@@ -1083,7 +1599,9 @@ class Activities(QWidget):
             self.badge.style().unpolish(self.badge)
             self.badge.style().polish(self.badge)
             parts = [p for p in (np.identity, np.album) if p]
-            self.now_label.set_full_text(" · ".join(parts) if parts else "Media")
+            note = " · ".join(parts) if parts else "Media"
+            ov = self._footer_override_text()
+            self.now_label.set_full_text(ov if ov else note)
             self._update_art(np.art_url or "")
             self._set_chips(np)
             if hasattr(self, "music_status"):
@@ -1100,7 +1618,9 @@ class Activities(QWidget):
             self._set_scrub(0.0)
             self.badge.setText("IDLE")
             self.badge.setProperty("playing", "false")
-            self.now_label.set_full_text("Live activities siap — hover untuk membuka")
+            ov = self._footer_override_text()
+            self.now_label.set_full_text(
+                ov if ov else "Live activities siap — hover untuk membuka")
             self._art_url = ""
             self._art_fallback(C.ACCENT_DEEP)
             self._set_chips(np)
@@ -1140,6 +1660,9 @@ class Activities(QWidget):
         target = max(0, int(self.scrub.width() * self._frac))
         if not animate or self.scrub.width() <= 0:
             self.scrub_fill.setGeometry(0, 0, target, self.scrub.height())
+            if hasattr(self, "scrub2"):
+                w2 = max(0, int(self.scrub2.width() * self._frac))
+                self.scrub2_fill.setGeometry(0, 0, w2, self.scrub2.height())
             return
         start = self.scrub_fill.width()
         if start == target:
@@ -1160,18 +1683,73 @@ class Activities(QWidget):
         super().resizeEvent(ev)
         self._place_children()
         self._set_scrub(self._frac, animate=False)
+        if hasattr(self, "scrub2"):
+            w = max(0, int(self.scrub2.width() * self._frac))
+            self.scrub2_fill.setGeometry(0, 0, w, self.scrub2.height())
 
     # ------------------------------------------------------------ waveform
     def _sync_wave(self) -> None:
-        if self._playing and not self._wave_timer.isActive():
+        popping = time.monotonic() < getattr(self, "_wave_pop_until", 0.0)
+        want = self._playing or popping
+        if want and not self._wave_timer.isActive():
             self._wave_timer.start()
             self._set_wave_dim(False)
-        elif not self._playing and self._wave_timer.isActive():
+        elif not want and self._wave_timer.isActive():
             self._wave_timer.stop()
             self._set_wave_dim(True)
             for bars, base in getattr(self, "_waves", []):
                 for b in bars:
                     b.setFixedHeight(max(3, base // 4))
+
+    def _wave_pop(self, ms: int = 1400) -> None:
+        """Satu denyut waveform saat perangkat audio tersambung."""
+        self._wave_pop_until = time.monotonic() + ms / 1000.0
+        if not self._wave_timer.isActive():
+            self._wave_timer.start()
+            self._set_wave_dim(False)
+
+    def _halo_pulse(self) -> None:
+        """Dua denyut halo di sekitar logo pill."""
+        from PySide6.QtCore import QVariantAnimation
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(1000)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+
+        def step(u: float) -> None:
+            a = abs(math.sin(float(u) * math.pi * 2.0)) * 0.55
+            self.compact_dot.setStyleSheet(
+                f"background: rgba(110,139,255,{a:.2f}); border-radius: 11px;")
+
+        anim.valueChanged.connect(step)
+        anim.finished.connect(lambda: self.compact_dot.setStyleSheet(""))
+        self._halo_anim = anim
+        anim.start()
+
+    def headset_event(self, kind: str, label: str) -> None:
+        """Event colok/cabut headset — animasi di pill compact."""
+        if kind == "plug":
+            text = f"Headset tersambung · {label}"
+        else:
+            text = f"Headset dicabut · {label}"
+        self.sneak_peek("toast", text, "", 2800, 24)
+        self._halo_pulse()
+        self._wave_pop()
+        if hasattr(self, "_fx"):
+            self._fx.play(kind, 2400)
+
+    def flash_footer(self, text: str, ms: int = 2800) -> None:
+        """Pesan singkat di footer saat panel sedang terbuka."""
+        self._footer_override = (text, time.monotonic() + ms / 1000.0)
+        self.now_label.set_full_text(text)
+
+    def _footer_override_text(self) -> str | None:
+        ov = getattr(self, "_footer_override", None)
+        if ov and time.monotonic() < ov[1]:
+            return ov[0]
+        self._footer_override = None
+        return None
 
     def _set_wave_dim(self, dim: bool) -> None:
         for bars, _base in getattr(self, "_waves", []):

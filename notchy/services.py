@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -380,3 +381,160 @@ def human_size(n: int) -> str:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024.0
     return f"{n:.1f} GB"
+
+# ================================================================= LIRIK
+LRC_TIME = re.compile(r"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]")
+_YT_NOISE = re.compile(
+    r"\b(official|lyrics?|lyric video|video|audio|visualizer|hd|4k|mv|m/v|"
+    r"remaster(ed)?|color coded)\b", re.I)
+
+
+@dataclass
+class LyricsResult:
+    synced: bool = False
+    lines: list = field(default_factory=list)   # [(waktu_detik, teks), ...]
+    status: str = ""                            # "" | "loading" | "notfound" | "error"
+    title: str = ""
+    artist: str = ""
+
+
+class LyricsService:
+    """Ambil lirik tersinkron dari LRCLIB (gratis, tanpa API key).
+
+    - membersihkan judul YouTube ('(Official Video)', 'ft. ...', '| Label')
+    - memilih hasil dengan syncedLyrics + durasi terdekat
+    - cache di ~/.cache/notchy/lyrics/
+    - fetch di thread; hasil diambil lewat poll()
+    """
+
+    API = "https://lrclib.net/api/search"
+    UA = "notchy/0.4 (Dynamic Island; Linux/Windows)"
+
+    def __init__(self) -> None:
+        self._result: LyricsResult | None = None
+        self._busy = False
+        self._key = ""
+        self._cache_dir = os.path.join(CACHE_DIR, "lyrics")
+
+    # ------------------------------------------------------------ util
+    @staticmethod
+    def parse_lrc(text: str) -> list[tuple[float, str]]:
+        out: list[tuple[float, str]] = []
+        for raw in (text or "").splitlines():
+            stamps = LRC_TIME.findall(raw)
+            if not stamps:
+                continue
+            content = LRC_TIME.sub("", raw).strip()
+            for m, s, frac in stamps:
+                t = int(m) * 60 + int(s)
+                if frac:
+                    t += float("0." + frac)
+                out.append((t, content))
+        out.sort(key=lambda x: x[0])
+        return out
+
+    @staticmethod
+    def clean_title(title: str, artist: str) -> tuple[str, str]:
+        t = _YT_NOISE.sub(" ", title or "")
+        t = re.sub(r"[\(\[].*?[\)\]]", " ", t)
+        t = re.split(r"\s+(?:ft\.?|feat\.?)\s+", t, flags=re.I)[0]
+        t = t.split("|")[0]
+        t = re.sub(r"\s+", " ", t).strip(" -–—")
+        a = (artist or "").strip()
+        if " - " in t:
+            left, right = t.split(" - ", 1)
+            left, right = left.strip(), right.strip()
+            if left and right:
+                return left, right
+        return a, t
+
+    def _cache_file(self, key: str) -> str:
+        import hashlib
+
+        os.makedirs(self._cache_dir, exist_ok=True)
+        return os.path.join(self._cache_dir, hashlib.sha256(key.encode()).hexdigest() + ".json")
+
+    # ------------------------------------------------------------ request
+    def request(self, np) -> None:
+        if not getattr(np, "available", False) or not np.title:
+            return
+        artist, track = self.clean_title(np.title, np.artist)
+        key = f"{artist.lower()}|{track.lower()}"
+        if key == self._key and (self._busy or self._result is not None):
+            return
+        self._key = key
+        self._result = None
+        # cache
+        try:
+            with open(self._cache_file(key), "r", encoding="utf-8") as f:
+                d = json.load(f)
+            self._result = LyricsResult(
+                synced=bool(d.get("synced")), lines=[(float(t), str(s)) for t, s in d.get("lines", [])],
+                status="" if d.get("lines") else "notfound", title=track, artist=artist)
+            return
+        except Exception:
+            pass
+        self._result = LyricsResult(status="loading", title=track, artist=artist)
+        if self._busy:
+            return
+        self._busy = True
+        threading.Thread(target=self._worker, args=(artist, track, float(getattr(np, "length", 0) or 0), key),
+                         daemon=True, name="notchy-lyrics").start()
+
+    def _worker(self, artist: str, track: str, duration: float, key: str) -> None:
+        try:
+            data = None
+            for attempt in range(3):
+                try:
+                    url = (f"{self.API}?track_name={urllib.parse.quote(track)}"
+                           f"&artist_name={urllib.parse.quote(artist)}")
+                    req = urllib.request.Request(url, headers={"User-Agent": self.UA,
+                                                               "Lrclib-Client": self.UA})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read(1024 * 1024).decode("utf-8", "replace"))
+                    if isinstance(data, list):
+                        break
+                except Exception:
+                    data = None
+                time.sleep(1.5 * (attempt + 1))
+            if not isinstance(data, list) or not data:
+                self._result = LyricsResult(status="notfound", title=track, artist=artist)
+                return
+            best = None
+            best_score = -1.0
+            for item in data:
+                score = 0.0
+                if item.get("syncedLyrics"):
+                    score += 2.0
+                if duration and item.get("duration"):
+                    score += max(0.0, 1.0 - abs(float(item["duration"]) - duration) / 30.0)
+                if score > best_score:
+                    best_score, best = score, item
+            if best is None:
+                self._result = LyricsResult(status="notfound", title=track, artist=artist)
+                return
+            if best.get("syncedLyrics"):
+                lines = self.parse_lrc(best["syncedLyrics"])
+                result = LyricsResult(synced=True, lines=lines, title=track, artist=artist)
+            elif best.get("plainLyrics"):
+                lines = [(float(i), ln) for i, ln in enumerate(best["plainLyrics"].splitlines())]
+                result = LyricsResult(synced=False, lines=lines, title=track, artist=artist)
+            else:
+                result = LyricsResult(status="notfound", title=track, artist=artist)
+            self._result = result
+            if result.lines:
+                try:
+                    with open(self._cache_file(key), "w", encoding="utf-8") as f:
+                        json.dump({"synced": result.synced, "lines": result.lines}, f)
+                except Exception:
+                    pass
+        finally:
+            self._busy = False
+
+    def poll(self) -> LyricsResult | None:
+        """Sekali-pakai: hasil dikonsumsi supaya UI tidak rebuild tiap tick."""
+        res = self._result
+        if res is None or res.status == "loading":
+            return None
+        self._result = None
+        return res

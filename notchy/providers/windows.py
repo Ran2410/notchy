@@ -282,3 +282,61 @@ class WindowsSystem:
                 self._volume.SetMasterVolumeLevelScalar(value / 100.0, None)
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------- audio out
+class AudioOutputMonitor:
+    """Deteksi headset di Windows dengan memantau perangkat output default.
+
+    Menggunakan pycaw (IMMDevice FriendlyName). Event dikembalikan lewat poll().
+    """
+
+    HEADSET_HINTS = ("headphone", "headset", "earbud", "airpod", "buds",
+                     "bluetooth", "wh-", "wf-", "jabra", "sony", "bose",
+                     "sennheiser", "usb audio")
+
+    def __init__(self) -> None:
+        self._last_name: str | None = None
+        self._last_is_headset: bool | None = None
+
+    def start(self) -> None:
+        self._read()
+
+    def stop(self) -> None:
+        pass
+
+    def _read(self) -> str | None:
+        try:
+            from pycaw.utils import AudioUtilities
+
+            dev = AudioUtilities.GetSpeakers()
+            name = getattr(dev, "FriendlyName", None)
+            if name is None:
+                # API lama: IAudioEndpointVolume tidak punya FriendlyName
+                return None
+            return str(name)
+        except Exception:
+            return None
+
+    def _is_headset(self, name: str) -> bool:
+        low = (name or "").lower()
+        return any(k in low for k in self.HEADSET_HINTS)
+
+    def poll(self) -> list[tuple[str, str]]:
+        name = self._read()
+        if name is None:
+            return []
+        is_headset = self._is_headset(name)
+        if self._last_name is None:
+            self._last_name = name
+            self._last_is_headset = is_headset
+            return []
+        if is_headset != self._last_is_headset or name != self._last_name:
+            was = self._last_is_headset
+            self._last_name = name
+            self._last_is_headset = is_headset
+            if is_headset and not was:
+                return [("plug", name)]
+            if was and not is_headset:
+                return [("unplug", "Speaker")]
+        return []
