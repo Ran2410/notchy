@@ -133,6 +133,24 @@ ISLAND_QSS = f"""
 }}
 #toggle-btn:hover {{ background: rgba(255,255,255,0.13); }}
 
+/* --- tab Info: cuaca / unduhan --- */
+#info-card {{
+    background: {C.TILE_BG};
+    border: 1px solid {C.GLASS_EDGE_SOFT};
+    border-radius: {C.RADIUS_TILE}px;
+}}
+#info-card:hover {{ background: {C.TILE_BG_HOVER}; }}
+#wx-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 22px; font-family: Sans; }}
+#wx-temp {{ color: {C.TEXT}; font-weight: 700; font-size: 24px; font-family: Sans; }}
+#wx-text {{ color: {C.TEXT_DIM}; font-weight: 600; font-size: 12px; font-family: Sans; }}
+#info-tag {{ color: {C.TEXT_FAINT}; font-weight: 700; font-size: 9px; font-family: Sans; }}
+#ag-title {{ color: {C.TEXT}; font-weight: 600; font-size: 13px; font-family: Sans; }}
+#dl-name {{ color: {C.TEXT}; font-weight: 600; font-size: 12px; font-family: Sans; }}
+#c-temp {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: Sans; }}
+#h-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: Sans; }}
+#h-temp {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: Sans; }}
+#ag-row {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: Sans; }}
+
 QSlider::groove:horizontal {{
     background: rgba(255,255,255,0.12);
     height: 4px; border-radius: 2px;

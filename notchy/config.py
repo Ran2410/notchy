@@ -8,7 +8,7 @@ Padanan temuan REA boring.notch:
 
 # Geometri (closed = pill mungil ala Dynamic Island, open = panel bento)
 CLOSED_W, CLOSED_H = 264, 40
-OPEN_W, OPEN_H = 528, 364
+OPEN_W, OPEN_H = 528, 372
 TOP_MARGIN = 8
 SIDE_MIN_MARGIN = 24
 
@@ -48,4 +48,11 @@ WAVE_TICK_MS = 70         # bar visualizer (AudioSpectrum analog)
 TOAST_MS = 3200           # notifikasi / sneak peek lagu
 HUD_MS = 1400             # HUD volume / brightness
 HUD_SUPPRESS_MS = 600     # abaikan perubahan volume sesaat setelah slider dikirim
+
+# Prioritas 2 — cuaca / unduhan / alert baterai
+WEATHER_POLL_MS = 60_000      # cek tiap menit; fetch nyata dibatasi max_age 30 menit
+DOWNLOADS_POLL_MS = 2_000
+BATTERY_LOW = 20              # toast peringatan di bawah ini
+BATTERY_REARM = 25            # izinkan peringatan lagi setelah naik di atas ini
+BATTERY_FULL = 99             # toast saat hampir penuh (sambil mengisi)
 

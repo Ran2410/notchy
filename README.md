@@ -59,6 +59,8 @@ klik kanan → Quit · slider volume langsung bekerja.
     (mis. YouTube di Chrome tidak mengekspos `Shuffle`/`LoopStatus` di MPRIS —
     gunakan Spotify/VLC/mpv untuk fitur itu; seek & transport tetap jalan)
   - **▦ Sistem** — tile VOL/BAT/CPU/RAM + strip timer/pomodoro
+  - **ⓘ Info** — **cuaca + prakiraan per jam** (Open-Meteo, lokasi via IP
+    atau config) dan **unduhan aktif** (folder Downloads)
 - **Sneak-peek / toast** — notifikasi desktop (Linux, D-Bus
   `org.freedesktop.Notifications`) dan judul saat lagu berganti tampil sekilas
   di pill, dengan prioritas: toast > HUD > timer > musik
@@ -66,8 +68,22 @@ klik kanan → Quit · slider volume langsung bekerja.
   dan tampil sebagai HUD ringkas di pill (bukan OSD bawaan)
 - **Timer / pomodoro** — preset 5/15/25/50 menit, play/pause/reset; sisa waktu
   mengambil alih pill compact saat aktif, notifikasi saat selesai
-- **Morph fluid** — animasi geometry OutCubic 280 ms, radius otomatis
-  pill ↔ rounded-rect
+- **Cuaca** — suhu + kondisi (kode WMO) di tab Info, **prakiraan per jam**
+  (5 jam ke depan), dan chip `32°` di pill; lokasi otomatis lewat IP atau
+  manual via config
+- **Watcher unduhan** — mendeteksi file yang sedang diunduh di `~/Downloads`
+  (`.part`/`.crdownload`/ukuran membesar), toast saat mulai & selesai
+- **Alert baterai** — toast saat mulai mengisi, daya dicabut, baterai lemah
+  (≤20%, sekali per sesi), dan hampir penuh (≥99%)
+- **Animasi** —
+  - morph pill ↔ panel (geometry OutCubic 280 ms) + radius otomatis
+  - tab: slide-out/in + flash halus judul tab
+  - progress seek **glide** antar polling (420 ms OutCubic)
+  - badge **PLAYING** berdenyut saat musik berjalan
+  - bar unduhan **marquee** saat ada unduhan aktif
+  - ikon cuaca **breathing** di tab Info
+  - timer **berkedip** saat sisa ≤60 detik
+  - jendela **fade-in** saat aplikasi mulai
 - **Hover-to-expand**, auto-close setelah kursor keluar, klik untuk pin
 - Thumbnail album di-fetch dari `mpris:artUrl` (file/http/data URI) dan di-cache
 
@@ -101,10 +117,24 @@ notchy/ui/
     activities.py           compact pill ↔ expanded bertab (Musik/Sistem) + sneak-peek
     style.py                QSS dark-glass
 notchy/timer.py             kontrol timer/pomodoro
+notchy/services.py          cuaca (Open-Meteo), agenda ICS, watcher unduhan
 legacy/gtk/                 implementasi GTK3 lama (Linux-only, referensi)
 scripts/capture_qt.py       uji visual → shots/
 shots/                      screenshot UI
 ```
+
+## Konfigurasi opsional
+
+Buat `~/.config/notchy/config.json` bila ingin mengatur manual:
+
+```json
+{
+  "weather":   { "lat": -6.2, "lon": 106.8, "city": "Jakarta" },
+  "downloads": { "dir": "~/Downloads" }
+}
+```
+
+Tanpa config, lokasi cuaca dideteksi via IP.
 
 ## Catatan Windows
 

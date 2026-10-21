@@ -122,6 +122,30 @@ class Activities(QWidget):
         self._wave_timer.setInterval(C.WAVE_TICK_MS)
         self._wave_timer.timeout.connect(self._wave_tick)
 
+        # --- state animasi mikro ---
+        self._pulse_phase = 0.0
+        self._scrub_anim = None
+        self._dl_phase = 0.0
+
+        self._badge_pulse_t = QTimer(self)
+        self._badge_pulse_t.setInterval(160)
+        self._badge_pulse_t.timeout.connect(self._badge_pulse)
+
+        self._wx_pulse_t = QTimer(self)
+        self._wx_pulse_t.setInterval(140)
+        self._wx_pulse_t.timeout.connect(self._wx_pulse)
+
+        self._wx_pulse_t.start()
+
+        self._dl_marquee_t = QTimer(self)
+        self._dl_marquee_t.setInterval(40)
+        self._dl_marquee_t.timeout.connect(self._dl_marquee_tick)
+
+        self._timer_blink_t = QTimer(self)
+        self._timer_blink_t.setInterval(550)
+        self._timer_blink_on = False
+        self._timer_blink_t.timeout.connect(self._timer_blink_tick)
+
         if self.timer is not None:
             self.timer.changed.connect(self._on_timer_changed)
             self.timer.finished.connect(lambda: self.sneak_peek(
@@ -162,6 +186,14 @@ class Activities(QWidget):
 
         self.compact_wave = self._make_wave(3, base=10)
         lay.addWidget(self.compact_wave)
+
+        self.compact_temp = QLabel("")
+        self.compact_temp.setObjectName("c-temp")
+        self.compact_temp.setFixedWidth(34)
+        self.compact_temp.setFixedHeight(20)
+        self.compact_temp.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
+        self.compact_temp.hide()
+        lay.addWidget(self.compact_temp)
 
         self.compact_clock = QLabel("--:--")
         self.compact_clock.setObjectName("c-clock")
@@ -232,6 +264,7 @@ class Activities(QWidget):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_page_music())
         self.pages.addWidget(self._build_page_system())
+        self.pages.addWidget(self._build_page_info())
         lay.addWidget(self.pages, 1)
 
         # ---------- footer (tetap di semua tab) ----------
@@ -265,7 +298,7 @@ class Activities(QWidget):
         lay.addWidget(footer)
 
         self._tab_index = 0
-        self._tab_names = ("Musik", "Sistem")
+        self._tab_names = ("Musik", "Sistem", "Info")
         return box
 
     # ============================================================ PAGE: MUSIK
@@ -500,6 +533,46 @@ class Activities(QWidget):
         lay.addStretch(1)
         return page
 
+    def _badge_pulse(self) -> None:
+        self._pulse_phase += 0.22
+        a = 0.62 + 0.38 * (0.5 + 0.5 * math.sin(self._pulse_phase))
+        self.badge.setStyleSheet(
+            f"color: rgba(81,207,102,{a:.2f});"
+            f" background: rgba(81,207,102,{0.14 * a:.2f});"
+            " border-radius: 999px;")
+
+    def _wx_pulse(self) -> None:
+        # breathing halus pada ikon cuaca, hanya saat tab Info aktif
+        if getattr(self, "pages", None) is None or self.pages.currentIndex() != 2:
+            return
+        self._pulse_phase += 0.16
+        a = 0.65 + 0.35 * (0.5 + 0.5 * math.sin(self._pulse_phase))
+        self.wx_icon.setStyleSheet(f"color: rgba(255,184,108,{a:.2f});")
+
+    def _dl_marquee_tick(self) -> None:
+        self._dl_phase += 0.055
+        if self._dl_phase > 1.0:
+            self._dl_phase -= 1.0
+        bar_w = max(1, self.dl_prog.width())
+        seg = max(24, int(bar_w * 0.30))
+        x = int((bar_w + seg) * self._dl_phase) - seg
+        x = max(0, min(bar_w - 1, x))
+        w = min(seg, bar_w - x)
+        self.dl_prog_fill.setGeometry(x, 0, w, 4)
+
+    def _timer_blink_tick(self) -> None:
+        if self.timer is None:
+            self._timer_blink_t.stop()
+            return
+        danger = self.timer.active and self.timer.remaining <= 60
+        if not danger:
+            self._timer_blink_t.stop()
+            self.timer_value.setStyleSheet("")
+            return
+        self._timer_blink_on = not self._timer_blink_on
+        self.timer_value.setStyleSheet(
+            "color: #FF6B9D;" if self._timer_blink_on else "")
+
     def _set_chips(self, np) -> None:
         if not hasattr(self, "chip_source"):
             return
@@ -541,6 +614,159 @@ class Activities(QWidget):
                 f"Repeat tidak didukung {player} (butuh Spotify/VLC/mpv)")
             self.btn_loop.setStyleSheet("color: rgba(255,255,255,0.25);")
 
+    # ============================================================ PAGE: INFO
+    def _build_page_info(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        # ---------- cuaca ----------
+        wx = QFrame()
+        wx.setObjectName("info-card")
+        wx.setMinimumHeight(72)
+        wl = QHBoxLayout(wx)
+        wl.setContentsMargins(12, 8, 12, 8)
+        wl.setSpacing(12)
+
+        self.wx_icon = QLabel("·")
+        self.wx_icon.setObjectName("wx-icon")
+        self.wx_icon.setFixedWidth(34)
+        self.wx_icon.setAlignment(Qt.AlignCenter)
+        wl.addWidget(self.wx_icon)
+
+        wcol = QVBoxLayout()
+        wcol.setSpacing(1)
+        self.wx_temp = QLabel("—")
+        self.wx_temp.setObjectName("wx-temp")
+        self.wx_temp.setMinimumHeight(30)
+        wcol.addWidget(self.wx_temp)
+        self.wx_text = QLabel("Cuaca belum tersedia")
+        self.wx_text.setObjectName("wx-text")
+        wcol.addWidget(self.wx_text)
+        self.wx_city = QLabel("")
+        self.wx_city.setObjectName("t-tiny")
+        wcol.addWidget(self.wx_city)
+        wl.addLayout(wcol, 1)
+        lay.addWidget(wx)
+
+        # prakiraan per jam
+        hours = QFrame()
+        hours.setObjectName("info-card")
+        hl = QHBoxLayout(hours)
+        hl.setContentsMargins(12, 6, 12, 6)
+        hl.setSpacing(6)
+        hours.setMinimumHeight(58)
+        self.wx_hours = []
+        for _ in range(5):
+            chip = QVBoxLayout()
+            chip.setSpacing(1)
+            hour = QLabel("--:--")
+            hour.setObjectName("t-tiny")
+            hour.setAlignment(Qt.AlignCenter)
+            icon = QLabel("·")
+            icon.setObjectName("h-icon")
+            icon.setAlignment(Qt.AlignCenter)
+            temp = QLabel("—")
+            temp.setObjectName("h-temp")
+            temp.setAlignment(Qt.AlignCenter)
+            chip.addWidget(hour)
+            chip.addWidget(icon)
+            chip.addWidget(temp)
+            hl.addLayout(chip, 1)
+            self.wx_hours.append((hour, icon, temp))
+        lay.addWidget(hours)
+
+
+
+        # ---------- unduhan ----------
+        dl = QFrame()
+        dl.setObjectName("info-card")
+        dll = QVBoxLayout(dl)
+        dll.setContentsMargins(12, 8, 12, 8)
+        dll.setSpacing(3)
+        dl.setMinimumHeight(60)
+        dhead = QHBoxLayout()
+        dicon = QLabel("⬇")
+        dicon.setObjectName("info-tag")
+        dhead.addWidget(dicon)
+        dtag = QLabel("UNDUHAN")
+        dtag.setObjectName("info-tag")
+        dhead.addWidget(dtag)
+        dhead.addStretch(1)
+        self.dl_count = QLabel("")
+        self.dl_count.setObjectName("t-tiny")
+        self.dl_count.setMinimumWidth(56)
+        self.dl_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        dhead.addWidget(self.dl_count)
+        dll.addLayout(dhead)
+        self.dl_name = ElidedLabel("Tidak ada unduhan aktif")
+        self.dl_name.setObjectName("dl-name")
+        dll.addWidget(self.dl_name)
+        self.dl_prog = QFrame()
+        self.dl_prog.setObjectName("scrub")
+        self.dl_prog.setFixedHeight(4)
+        self.dl_prog_fill = QFrame(self.dl_prog)
+        self.dl_prog_fill.setObjectName("scrub-fill")
+        self.dl_prog_fill.setGeometry(0, 0, 0, 4)
+        dll.addWidget(self.dl_prog)
+        lay.addWidget(dl)
+
+        lay.addStretch(1)
+        return page
+
+    # ------------------------------------------------------------ update info
+    def update_weather(self, wx) -> None:
+        if not hasattr(self, "wx_temp"):
+            return
+        if wx is None or not getattr(wx, "ok", False):
+            self.wx_temp.setText("—")
+            self.wx_text.setText("Cuaca belum tersedia")
+            self.wx_city.setText("")
+            self.wx_icon.setText("·")
+            return
+        self.wx_icon.setText(wx.icon)
+        self.wx_temp.setText(f"{wx.temp:.0f}°")
+        self.wx_text.setText(wx.text)
+        import datetime as _dt
+        stamp = _dt.datetime.fromtimestamp(wx.updated).strftime("%H:%M") if wx.updated else "—"
+        self.wx_city.setText(f"{wx.city} · diperbarui {stamp}" if wx.city else f"diperbarui {stamp}")
+        if hasattr(self, "compact_temp"):
+            self.compact_temp.setText(f"{wx.temp:.0f}°")
+            self.compact_temp.show()
+        # strip per jam
+        hourly = getattr(wx, "hourly", []) or []
+        from ..services import WMO
+        for i, (hour, icon, temp) in enumerate(self.wx_hours):
+            if i < len(hourly):
+                h_label, h_temp, h_code = hourly[i]
+                hour.setText(h_label)
+                icon.setText(WMO.get(h_code, ("", "·"))[1])
+                temp.setText(f"{h_temp:.0f}°")
+            else:
+                hour.setText("--:--")
+                icon.setText("·")
+                temp.setText("—")
+
+    def update_downloads(self, active) -> None:
+        if not hasattr(self, "dl_name"):
+            return
+        from ..services import human_size
+
+        if not active:
+            self._dl_marquee_t.stop()
+            self.dl_name.set_full_text("Tidak ada unduhan aktif")
+            self.dl_count.setText("")
+            self.dl_prog_fill.setGeometry(0, 0, 0, 4)
+            return
+        dl = active[0]
+        extra = f" · +{len(active) - 1} lagi" if len(active) > 1 else ""
+        self.dl_name.set_full_text(f"{dl.name}{extra}")
+        self.dl_count.setText(human_size(dl.size))
+        if not self._dl_marquee_t.isActive():
+            self._dl_phase = 0.0
+            self._dl_marquee_t.start()
+
     # ------------------------------------------------------------ tab nav
     def switch_tab(self, delta: int) -> None:
         total = self.pages.count()
@@ -563,6 +789,9 @@ class Activities(QWidget):
             self.pages.setCurrentIndex(self._pending_tab)
             self._tab_index = self._pending_tab
             self.tab_title.setText(self._tab_names[self._tab_index])
+            # flash halus pada judul tab
+            self.tab_title.setStyleSheet("color: #6E8BFF;")
+            QTimer.singleShot(320, lambda: self.tab_title.setStyleSheet(""))
             self.tab_dots.setText("".join(
                 "●" if i == self._tab_index else "○" for i in range(self.pages.count())))
             start_pos = QPoint(home.x() + 48 * self._tab_dir, home.y())
@@ -686,7 +915,7 @@ class Activities(QWidget):
                 w = max(1, self.scrub.width())
                 frac = max(0.0, min(1.0, ev.position().x() / w))
                 self.seek_requested.emit(frac)
-                self._set_scrub(frac)
+                self._set_scrub(frac, animate=False)
                 return True
         # preset timer (menit)
         if ev.type() == ev.Type.MouseButtonRelease and obj.property("preset"):
@@ -727,6 +956,12 @@ class Activities(QWidget):
         self.timer_value.setText(self.timer.text())
         w = max(0, int(self.timer_prog.width() * self.timer.progress()))
         self.timer_prog_fill.setGeometry(0, 0, w, 4)
+        if self.timer.active and self.timer.running and self.timer.remaining <= 60:
+            if not self._timer_blink_t.isActive():
+                self._timer_blink_t.start()
+        else:
+            self._timer_blink_t.stop()
+            self.timer_value.setStyleSheet("")
         self._refresh_compact()
 
     # ------------------------------------------------------------ sneak-peek
@@ -838,6 +1073,11 @@ class Activities(QWidget):
             self.time_now.setText(fmt_time(np.position))
             self.time_len.setText(fmt_time(np.length))
             self._set_scrub(np.progress or 0.0)
+            if np.playing and not self._badge_pulse_t.isActive():
+                self._badge_pulse_t.start()
+            elif not np.playing:
+                self._badge_pulse_t.stop()
+                self.badge.setStyleSheet("")
             self.badge.setText("PLAYING" if np.playing else "PAUSED")
             self.badge.setProperty("playing", "true" if np.playing else "false")
             self.badge.style().unpolish(self.badge)
@@ -894,15 +1134,32 @@ class Activities(QWidget):
         self.compact_clock.setText(st.time_str)
         self._refresh_compact()
 
-    def _set_scrub(self, frac: float) -> None:
+    def _set_scrub(self, frac: float, animate: bool = True) -> None:
+        """Animasi glide antar posisi (polling 0,9 dtk → gores mulus)."""
         self._frac = max(0.0, min(1.0, frac or 0.0))
-        w = max(0, int(self.scrub.width() * self._frac))
-        self.scrub_fill.setGeometry(0, 0, w, 4)
+        target = max(0, int(self.scrub.width() * self._frac))
+        if not animate or self.scrub.width() <= 0:
+            self.scrub_fill.setGeometry(0, 0, target, self.scrub.height())
+            return
+        start = self.scrub_fill.width()
+        if start == target:
+            return
+        from PySide6.QtCore import QEasingCurve, QVariantAnimation
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(420)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.setStartValue(float(start))
+        anim.setEndValue(float(target))
+        anim.valueChanged.connect(
+            lambda v: self.scrub_fill.setGeometry(0, 0, int(v), self.scrub.height()))
+        self._scrub_anim = anim
+        anim.start()
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
         self._place_children()
-        self._set_scrub(self._frac)
+        self._set_scrub(self._frac, animate=False)
 
     # ------------------------------------------------------------ waveform
     def _sync_wave(self) -> None:

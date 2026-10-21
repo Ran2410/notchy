@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from .. import config as C
 from ..providers import make_providers
+from ..services import DownloadsService, WeatherService
 from ..timer import TimerController
 from .activities import Activities
 from .style import ISLAND_QSS
@@ -47,6 +48,13 @@ class IslandWindow(QWidget):
 
         self.sys_state = SystemState()
         self.timer_controller = TimerController(self)
+
+        # Prioritas 2
+        self.weather = WeatherService()
+        self.downloads = DownloadsService()
+        self._bat_low_alerted = False
+        self._bat_full_alerted = False
+        self._last_charging = None
 
         self.activities = Activities(timer=self.timer_controller, parent=self)
         self.activities.setObjectName("island-bg")
@@ -95,6 +103,17 @@ class IslandWindow(QWidget):
         self._pointer_watch.timeout.connect(self._verify_pointer)
         self._pointer_watch.start()
 
+        # Prioritas 2 — cuaca / unduhan
+        self._poll_weather = QTimer(self)
+        self._poll_weather.setInterval(C.WEATHER_POLL_MS)
+        self._poll_weather.timeout.connect(self._do_poll_weather)
+        self._poll_weather.start()
+
+        self._poll_downloads = QTimer(self)
+        self._poll_downloads.setInterval(C.DOWNLOADS_POLL_MS)
+        self._poll_downloads.timeout.connect(self._do_poll_downloads)
+        self._poll_downloads.start()
+
         self.activities.play_pause_clicked.connect(self.providers.media.play_pause)
         self.activities.next_clicked.connect(self.providers.media.next)
         self.activities.prev_clicked.connect(self.providers.media.previous)
@@ -124,6 +143,8 @@ class IslandWindow(QWidget):
         self._do_poll_media()
         self._do_poll_sys()
         self._do_poll_clock()
+        self._do_poll_weather()
+        self._do_poll_downloads()
         self.setGeometry(self._place_top_center(C.CLOSED_W, C.CLOSED_H))
 
     # ------------------------------------------------------------ layout
@@ -349,7 +370,49 @@ class IslandWindow(QWidget):
                                            "☀", C.HUD_MS, 20)
             self._last_bright = st.brightness
 
+        self._check_battery_alerts(st)
         self.activities.update_system(st)
+
+    def _check_battery_alerts(self, st) -> None:
+        if not st.battery_present:
+            return
+        # transisi pengisian
+        if self._last_charging is not None and st.charging != self._last_charging:
+            if st.charging:
+                self.activities.sneak_peek("toast", "Mengisi daya", "⚡", C.HUD_MS, 18)
+            else:
+                self.activities.sneak_peek("toast", "Daya dicabut", "●", C.HUD_MS, 18)
+        self._last_charging = st.charging
+
+        # baterai lemah / penuh (sekali per sesi)
+        if st.battery_percent <= C.BATTERY_LOW and not st.charging:
+            if not self._bat_low_alerted:
+                self._bat_low_alerted = True
+                self.activities.sneak_peek(
+                    "toast", f"Baterai lemah: {st.battery_percent}%", "●", C.TOAST_MS, 26)
+        elif st.battery_percent >= C.BATTERY_REARM:
+            self._bat_low_alerted = False
+
+        if st.charging and st.battery_percent >= C.BATTERY_FULL:
+            if not self._bat_full_alerted:
+                self._bat_full_alerted = True
+                self.activities.sneak_peek(
+                    "toast", f"Baterai penuh: {st.battery_percent}%", "⚡", C.TOAST_MS, 26)
+        elif st.battery_percent < 95 or not st.charging:
+            self._bat_full_alerted = False
+
+    def _do_poll_weather(self) -> None:
+        self.weather.refresh_async()
+        self.activities.update_weather(self.weather.data)
+
+    def _do_poll_downloads(self) -> None:
+        self.downloads.scan()
+        for kind, name in self.downloads.take_events():
+            if kind == "started":
+                self.activities.sneak_peek("toast", f"Mengunduh: {name}", "⬇", C.TOAST_MS, 16)
+            elif kind == "finished":
+                self.activities.sneak_peek("toast", f"Unduhan selesai: {name}", "✓", C.TOAST_MS, 16)
+        self.activities.update_downloads(list(self.downloads.active.values()))
 
     def _on_volume_slider(self, value: int) -> None:
         import time as _time
@@ -392,5 +455,16 @@ def run_qt() -> int:
     app.setQuitOnLastWindowClosed(True)
 
     win = IslandWindow()
+    win.setWindowOpacity(0.0)
     win.show()
+
+    # fade-in halus saat aplikasi mulai
+    fade = QPropertyAnimation(win, b"windowOpacity")
+    fade.setDuration(280)
+    fade.setEasingCurve(QEasingCurve.OutCubic)
+    fade.setStartValue(0.0)
+    fade.setEndValue(1.0)
+    fade.start()
+    win._fade_in = fade  # cegah garbage collection
+
     return app.exec()
