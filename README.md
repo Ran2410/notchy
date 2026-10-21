@@ -45,8 +45,10 @@ klik kanan → Quit · slider volume langsung bekerja.
 
 ## Fitur
 
-- **Pill compact** (`264×40`, rounded penuh) — ikon status, teks fokus
+- **Pill compact** (`264×40`, rounded penuh) — **logo notchy**, teks fokus
   (lagu / timer / toast), waveform mini, jam
+- **Branding** — logo tampil di pill compact, header tab, placeholder art saat
+  idle, dan icon jendela/taskbar
 - **Panel expanded bertab** (`528×364`) — hanya fitur yang isinya banyak
   dijadikan tab, diganti lewat **panah ‹ ›** (klik / keyboard kiri-kanan / scroll)
   dengan animasi slide-out/slide-in (OutCubic):
@@ -85,6 +87,9 @@ klik kanan → Quit · slider volume langsung bekerja.
 
 ```
 run.py                      entry point (Qt)
+assets/
+    notchy-icon.png         ikon (crop dari notchy-hero-dark.png)
+    notchy-wordmark.png     wordmark
 notchy/config.py            design token + geometri + timing
 notchy/art.py               fetch & thumbnail album art (file/http/data URI)
 notchy/providers/

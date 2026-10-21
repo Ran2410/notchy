@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import random
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -69,6 +70,11 @@ class ElidedLabel(QLabel):
         return getattr(self, "_full_text", self.text())
 
 
+ASSETS_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets"))
+LOGO_ICON = os.path.join(ASSETS_DIR, "notchy-icon.png")
+
+
 class Activities(QWidget):
     volume_changed = Signal(int)
     play_pause_clicked = Signal()
@@ -123,6 +129,12 @@ class Activities(QWidget):
 
         self.set_opacity_for(0.0)
 
+    def _logo_pixmap(self, height: int) -> QPixmap:
+        pm = QPixmap(LOGO_ICON)
+        if pm.isNull():
+            return pm
+        return pm.scaledToHeight(height, Qt.SmoothTransformation)
+
     # ============================================================ COMPACT
     def _build_compact(self) -> QWidget:
         row = QWidget()
@@ -130,11 +142,17 @@ class Activities(QWidget):
         lay.setContentsMargins(14, 0, 14, 0)
         lay.setSpacing(8)
 
-        self.compact_dot = QLabel("●")
+        self.compact_dot = QLabel()
         self.compact_dot.setObjectName("c-dot")
         self.compact_dot.setAlignment(Qt.AlignCenter)
-        self.compact_dot.setFixedWidth(18)
-        self.compact_dot.setFixedHeight(20)
+        self.compact_dot.setFixedHeight(22)
+        pm = self._logo_pixmap(20)
+        if not pm.isNull():
+            self.compact_dot.setPixmap(pm)
+            self.compact_dot.setFixedWidth(int(pm.width() * 20 / max(1, pm.height())))
+        else:
+            self.compact_dot.setText("●")
+            self.compact_dot.setFixedWidth(18)
         lay.addWidget(self.compact_dot)
 
         self.compact_title = ElidedLabel("notchy")
@@ -176,10 +194,23 @@ class Activities(QWidget):
         self.tab_prev.setProperty("tab_delta", -1)
         header.addWidget(self.tab_prev)
 
-        self.tab_title = QLabel("♪  Musik")
+        self.tab_logo = QLabel()
+        self.tab_logo.setObjectName("tab-logo")
+        pm = self._logo_pixmap(18)
+        if not pm.isNull():
+            self.tab_logo.setPixmap(pm)
+        mid = QWidget()
+        mlay = QHBoxLayout(mid)
+        mlay.setContentsMargins(0, 0, 0, 0)
+        mlay.setSpacing(8)
+        mlay.addStretch(1)
+        mlay.addWidget(self.tab_logo)
+        self.tab_title = QLabel("Musik")
         self.tab_title.setObjectName("tab-title")
         self.tab_title.setAlignment(Qt.AlignCenter)
-        header.addWidget(self.tab_title, 1)
+        mlay.addWidget(self.tab_title)
+        mlay.addStretch(1)
+        header.addWidget(mid, 1)
 
         self.tab_dots = QLabel("●○")
         self.tab_dots.setObjectName("tab-dots")
@@ -234,7 +265,7 @@ class Activities(QWidget):
         lay.addWidget(footer)
 
         self._tab_index = 0
-        self._tab_names = ("♪  Musik", "▦  Sistem")
+        self._tab_names = ("Musik", "Sistem")
         return box
 
     # ============================================================ PAGE: MUSIK
@@ -292,6 +323,9 @@ class Activities(QWidget):
             chips.addWidget(c)
         chips.addStretch(1)
         info.addLayout(chips)
+
+        # jarak ekstra chips → progress bar (biar tidak menempel)
+        info.addSpacing(12)
 
         # scrub seekable (klik / drag untuk lompat posisi)
         self.scrub = QFrame()
@@ -723,18 +757,15 @@ class Activities(QWidget):
 
     def _refresh_compact(self) -> None:
         # prioritas: peek (toast/hud) > timer > musik
+        # logo tetap di compact_dot (identitas) — hanya teks yang berganti
         if self._peek:
-            _prio, text, icon, _exp = max(self._peek.values(), key=lambda v: v[0])
+            _prio, text, _icon, _exp = max(self._peek.values(), key=lambda v: v[0])
             self.compact_title.set_full_text(text)
-            self.compact_dot.setText(icon)
             return
         if self.timer is not None and self.timer.active:
-            icon = "⏸" if self.timer.running else "⏸"
             self.compact_title.set_full_text(f"{self.timer.label}  {self.timer.text()}")
-            self.compact_dot.setText("▶" if self.timer.running else "⏸")
             return
         self.compact_title.set_full_text(self._base_title)
-        self.compact_dot.setText(self._base_icon)
 
     # ------------------------------------------------------------ morph
     def set_opacity_for(self, t: float) -> None:
@@ -766,13 +797,16 @@ class Activities(QWidget):
         self._art_loaded_url = url
 
     def _art_fallback(self, color: str) -> None:
-        self.art_label.clear()
-        self.art_label.setText("♪")
         self.art_label.setStyleSheet(
             f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {color},"
-            f" stop:1 #7C5CFF); border-radius: 16px; color: rgba(255,255,255,0.85);"
-            f" font: 700 26px Sans;"
+            f" stop:1 #7C5CFF); border-radius: 16px;"
         )
+        pm = self._logo_pixmap(52)
+        if not pm.isNull():
+            self.art_label.setText("")
+            self.art_label.setPixmap(pm)
+        else:
+            self.art_label.setText("♪")
         self._art_loaded_url = ""
 
     def _update_art(self, art_url: str) -> None:

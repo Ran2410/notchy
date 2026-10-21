@@ -34,6 +34,14 @@ class IslandWindow(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, False)
         self.setWindowTitle("notchy")
 
+        import os as _os
+        from PySide6.QtGui import QIcon as _QIcon
+
+        _icon_path = _os.path.normpath(_os.path.join(
+            _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "assets", "notchy-icon.png"))
+        if _os.path.isfile(_icon_path):
+            self.setWindowIcon(_QIcon(_icon_path))
+
         self.providers = make_providers()
         from ..providers.base import SystemState
 
@@ -373,6 +381,14 @@ def run_qt() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("notchy")
+
+    import os as _os
+    from PySide6.QtGui import QIcon as _QIcon
+
+    _icon_path = _os.path.normpath(_os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "assets", "notchy-icon.png"))
+    if _os.path.isfile(_icon_path):
+        app.setWindowIcon(_QIcon(_icon_path))
     app.setQuitOnLastWindowClosed(True)
 
     win = IslandWindow()

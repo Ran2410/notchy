@@ -15,11 +15,10 @@ ISLAND_QSS = f"""
     border-radius: {C.RADIUS_ISLAND}px;
 }}
 #c-dot {{
-    color: {C.ACCENT};
     background: transparent;
-    font-weight: 700; font-size: 11px; font-family: Sans;
-    min-width: 18px; max-width: 18px; min-height: 20px; max-height: 20px;
+    padding: 0; margin: 0;
 }}
+#tab-logo {{ background: transparent; }}
 #c-title {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: Sans; }}
 #c-chip {{
     color: {C.TEXT_DIM};
