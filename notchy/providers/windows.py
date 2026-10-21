@@ -77,6 +77,28 @@ class WindowsMedia:
         pos = timeline.position.total_seconds() if timeline else 0.0
         end = timeline.end_time.total_seconds() if timeline else 0.0
 
+        shuffle = False
+        loop_status = "None"
+        can_shuffle = False
+        can_loop = False
+        try:
+            controls = getattr(playback, "controls", None)
+            if controls is not None:
+                can_shuffle = bool(getattr(controls, "is_shuffle_enabled", False))
+                can_loop = bool(getattr(controls, "is_repeat_enabled", False))
+        except Exception:
+            pass
+        try:
+            shuffle = bool(getattr(playback, "shuffle_enabled", False) or
+                           getattr(getattr(playback, "controls", None), "is_shuffle_enabled", False))
+        except Exception:
+            pass
+        try:
+            mode = int(getattr(playback, "auto_repeat_mode", 0) or 0)
+            loop_status = {0: "None", 1: "Track", 2: "Playlist"}.get(mode, "None")
+        except Exception:
+            pass
+
         app_id = ""
         try:
             app_id = session.source_app_user_model_id or ""
@@ -96,6 +118,10 @@ class WindowsMedia:
             position=pos,
             length=end,
             art_url=art_url,
+            shuffle=shuffle,
+            loop_status=loop_status,
+            can_shuffle=can_shuffle,
+            can_loop=can_loop,
         )
 
     async def _cache_art(self, info) -> str:
@@ -135,6 +161,57 @@ class WindowsMedia:
 
     def previous(self) -> None:
         self._fire("try_skip_previous_async")
+
+    def seek(self, seconds: float) -> None:
+        async def go() -> None:
+            from winsdk.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+            )
+            import datetime as _dt
+
+            mgr = await SessionManager.request_async()
+            session = mgr.get_current_session()
+            if session is not None:
+                span = _dt.timedelta(seconds=max(0.0, float(seconds)))
+                await session.try_change_playback_position_async(span)
+
+        try:
+            self._runner.run(go(), timeout=1.5)
+        except Exception:
+            pass
+
+    def set_shuffle(self, enabled: bool) -> None:
+        async def go() -> None:
+            from winsdk.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+            )
+            mgr = await SessionManager.request_async()
+            session = mgr.get_current_session()
+            if session is not None:
+                await session.try_change_shuffle_async(bool(enabled))
+
+        try:
+            self._runner.run(go(), timeout=1.5)
+        except Exception:
+            pass
+
+    def cycle_loop(self) -> None:
+        order = {"None": 1, "Track": 2, "Playlist": 0}  # → AutoRepeatMode
+        nxt = order.get(getattr(self._state, "loop_status", "None"), 0)
+
+        async def go() -> None:
+            from winsdk.windows.media.control import (
+                GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+            )
+            mgr = await SessionManager.request_async()
+            session = mgr.get_current_session()
+            if session is not None:
+                await session.try_change_auto_repeat_mode_async(nxt)
+
+        try:
+            self._runner.run(go(), timeout=1.5)
+        except Exception:
+            pass
 
     def _fire(self, method: str) -> None:
         async def go() -> None:

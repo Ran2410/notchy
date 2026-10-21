@@ -11,7 +11,9 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QSlider,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -44,6 +46,9 @@ class ElidedLabel(QLabel):
     def __init__(self, text: str = "", parent=None) -> None:
         super().__init__(text, parent)
         self._full_text = text
+        # Abaikan sizeHint untuk lebar: teks yang berubah-ubah tidak boleh
+        # membuat layout di sekitarnya ikut membesar/mengecil.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
     def set_full_text(self, text: str) -> None:
         self._full_text = text
@@ -69,19 +74,31 @@ class Activities(QWidget):
     play_pause_clicked = Signal()
     next_clicked = Signal()
     prev_clicked = Signal()
+    seek_requested = Signal(float)      # 0..1 dari progress bar
+    shuffle_clicked = Signal()
+    loop_clicked = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, timer=None, parent=None) -> None:
         super().__init__(parent)
         # WA_StyledBackground: wajib agar QSS #island-bg terpaint pada QWidget custom
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.timer = timer
         self._has_media = False
         self._playing = False
         self._art_url = ""
         self._art_loaded_url = ""
-        self._art_size = 72
+        self._art_size = 88
         self._sys_hint = "…"
         self._wave_level = 0.0
         self._frac = 0.0
+
+        # --- display prioritas pill: peek (toast/hud) > timer > musik ---
+        self._base_title = "notchy"
+        self._base_icon = "●"
+        self._peek: dict[str, tuple] = {}   # kind -> (prio, text, icon, expire_ms)
+        self._peek_timer = QTimer(self)
+        self._peek_timer.setSingleShot(True)
+        self._peek_timer.timeout.connect(self._peek_expire)
 
         # Tanpa layout root: compact & expanded diposisikan manual di resizeEvent
         # supaya widget yang sedang di-fade tidak menghimpit yang lain (bug clip).
@@ -98,6 +115,11 @@ class Activities(QWidget):
         self._wave_timer = QTimer(self)
         self._wave_timer.setInterval(C.WAVE_TICK_MS)
         self._wave_timer.timeout.connect(self._wave_tick)
+
+        if self.timer is not None:
+            self.timer.changed.connect(self._on_timer_changed)
+            self.timer.finished.connect(lambda: self.sneak_peek(
+                "toast", f"{self.timer.label} selesai", "⏱", C.TOAST_MS, 30))
 
         self.set_opacity_for(0.0)
 
@@ -138,103 +160,50 @@ class Activities(QWidget):
     def _build_expanded(self) -> QWidget:
         box = QWidget()
         lay = QVBoxLayout(box)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(12)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(10)
 
-        # ---------- hero musik ----------
-        hero = QFrame()
-        hero.setObjectName("hero")
-        hlay = QHBoxLayout(hero)
-        hlay.setContentsMargins(12, 12, 12, 12)
-        hlay.setSpacing(14)
+        # ---------- header tab: ‹  [ikon judul ●○○]  › ----------
+        header = QHBoxLayout()
+        header.setSpacing(8)
 
-        self.art_label = QLabel("♪")
-        self.art_label.setFixedSize(self._art_size, self._art_size)
-        self.art_label.setAlignment(Qt.AlignCenter)
-        self.art_label.setStyleSheet(
-            f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
-            f" stop:1 #7C5CFF); border-radius: 14px; color: rgba(255,255,255,0.85);"
-            f" font: 700 26px Sans;"
-        )
-        hlay.addWidget(self.art_label, 0, Qt.AlignVCenter)
+        self.tab_prev = QLabel("‹")
+        self.tab_prev.setObjectName("tab-arrow")
+        self.tab_prev.setAlignment(Qt.AlignCenter)
+        self.tab_prev.setFixedSize(30, 30)
+        self.tab_prev.setToolTip("Tab sebelumnya")
+        self.tab_prev.installEventFilter(self)
+        self.tab_prev.setProperty("tab_delta", -1)
+        header.addWidget(self.tab_prev)
 
-        info = QVBoxLayout()
-        info.setSpacing(4)
+        self.tab_title = QLabel("♪  Musik")
+        self.tab_title.setObjectName("tab-title")
+        self.tab_title.setAlignment(Qt.AlignCenter)
+        header.addWidget(self.tab_title, 1)
 
-        top = QHBoxLayout()
-        self.title = ElidedLabel("Tidak ada musik")
-        self.title.setObjectName("h-title")
-        top.addWidget(self.title, 1)
-        self.badge = QLabel("IDLE")
-        self.badge.setObjectName("badge")
-        top.addWidget(self.badge, 0, Qt.AlignRight)
-        info.addLayout(top)
+        self.tab_dots = QLabel("●○")
+        self.tab_dots.setObjectName("tab-dots")
+        self.tab_dots.setAlignment(Qt.AlignCenter)
+        header.addWidget(self.tab_dots)
 
-        self.artist = ElidedLabel("Putar sesuatu di pemutar favoritmu")
-        self.artist.setObjectName("h-sub")
-        info.addWidget(self.artist)
+        self.tab_next = QLabel("›")
+        self.tab_next.setObjectName("tab-arrow")
+        self.tab_next.setAlignment(Qt.AlignCenter)
+        self.tab_next.setFixedSize(30, 30)
+        self.tab_next.setToolTip("Tab berikutnya")
+        self.tab_next.installEventFilter(self)
+        self.tab_next.setProperty("tab_delta", 1)
+        header.addWidget(self.tab_next)
 
-        self.scrub = QFrame()
-        self.scrub.setObjectName("scrub")
-        self.scrub.setFixedHeight(4)
-        self.scrub_fill = QFrame(self.scrub)
-        self.scrub_fill.setObjectName("scrub-fill")
-        self.scrub_fill.setGeometry(0, 0, 0, 4)
-        info.addWidget(self.scrub)
+        lay.addLayout(header)
 
-        times = QHBoxLayout()
-        self.time_now = QLabel("0:00")
-        self.time_now.setObjectName("t-tiny")
-        self.time_len = QLabel("0:00")
-        self.time_len.setObjectName("t-tiny")
-        times.addWidget(self.time_now)
-        times.addStretch(1)
-        times.addWidget(self.time_len)
-        info.addLayout(times)
+        # ---------- halaman tab ----------
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._build_page_music())
+        self.pages.addWidget(self._build_page_system())
+        lay.addWidget(self.pages, 1)
 
-        hlay.addLayout(info, 1)
-
-        seg = QFrame()
-        seg.setObjectName("seg")
-        slay = QHBoxLayout(seg)
-        slay.setContentsMargins(4, 2, 4, 2)
-        slay.setSpacing(2)
-        for label, sig, tip in (
-            ("⏮", self.prev_clicked, "Previous"),
-            ("⏯", self.play_pause_clicked, "Play / Pause"),
-            ("⏭", self.next_clicked, "Next"),
-        ):
-            btn = QLabel(label)
-            btn.setObjectName("seg-btn")
-            btn.setAlignment(Qt.AlignCenter)
-            btn.setFixedSize(34, 30)
-            btn.setToolTip(tip)
-            btn.installEventFilter(self)
-            btn.setProperty("sig", sig)
-            slay.addWidget(btn)
-        hlay.addWidget(seg, 0, Qt.AlignVCenter)
-
-        lay.addWidget(hero)
-
-        # ---------- bento tiles ----------
-        tiles = QHBoxLayout()
-        tiles.setSpacing(10)
-        self.tile_vol = self._tile("VOL", "Volume", C.ACCENT)
-        self.tile_bat = self._tile("BAT", "Battery", C.ACCENT_GREEN)
-        self.tile_cpu = self._tile("CPU", "Processor", C.ACCENT2)
-        self.tile_ram = self._tile("RAM", "Memory", C.ACCENT_WARM)
-
-        self.vol_slider = QSlider(Qt.Horizontal)
-        self.vol_slider.setRange(0, 100)
-        self.vol_slider.setFixedHeight(16)
-        self.vol_slider.valueChanged.connect(self.volume_changed.emit)
-        self.tile_vol["body"].addWidget(self.vol_slider)
-
-        for t in (self.tile_vol, self.tile_bat, self.tile_cpu, self.tile_ram):
-            tiles.addWidget(t["frame"], 1)
-        lay.addLayout(tiles)
-
-        # ---------- footer ----------
+        # ---------- footer (tetap di semua tab) ----------
         footer = QFrame()
         footer.setObjectName("footer")
         flay = QHBoxLayout(footer)
@@ -253,15 +222,347 @@ class Activities(QWidget):
         self.clock_label = QLabel("--:--")
         self.clock_label.setObjectName("big-clock")
         self.clock_label.setAlignment(Qt.AlignRight)
+        self.clock_label.setFixedWidth(80)
         self.date_label = QLabel("")
         self.date_label.setObjectName("t-tiny")
         self.date_label.setAlignment(Qt.AlignRight)
+        self.date_label.setFixedWidth(80)
         clock_box.addWidget(self.clock_label)
         clock_box.addWidget(self.date_label)
         flay.addLayout(clock_box)
 
         lay.addWidget(footer)
+
+        self._tab_index = 0
+        self._tab_names = ("♪  Musik", "▦  Sistem")
         return box
+
+    # ============================================================ PAGE: MUSIK
+    def _build_page_music(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        hero = QFrame()
+        hero.setObjectName("hero")
+        hlay = QHBoxLayout(hero)
+        hlay.setContentsMargins(14, 14, 14, 14)
+        hlay.setSpacing(16)
+
+        # art lebih besar
+        self.art_label = QLabel("♪")
+        self.art_label.setFixedSize(88, 88)
+        self.art_label.setAlignment(Qt.AlignCenter)
+        self.art_label.setStyleSheet(
+            f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
+            f" stop:1 #7C5CFF); border-radius: 16px; color: rgba(255,255,255,0.85);"
+            f" font: 700 30px Sans;"
+        )
+        hlay.addWidget(self.art_label, 0, Qt.AlignVCenter)
+
+        info = QVBoxLayout()
+        info.setSpacing(5)
+
+        top = QHBoxLayout()
+        self.title = ElidedLabel("Tidak ada musik")
+        self.title.setObjectName("h-title")
+        top.addWidget(self.title, 1)
+        self.badge = QLabel("IDLE")
+        self.badge.setObjectName("badge")
+        top.addWidget(self.badge, 0, Qt.AlignRight)
+        info.addLayout(top)
+
+        self.artist = ElidedLabel("Putar sesuatu di pemutar favoritmu")
+        self.artist.setObjectName("h-sub")
+        info.addWidget(self.artist)
+
+        # chips meta: sumber · album · status
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        self.chip_source = QLabel("—")
+        self.chip_source.setObjectName("t-chip")
+        self.chip_album = QLabel("—")
+        self.chip_album.setObjectName("t-chip")
+        self.chip_state = QLabel("idle")
+        self.chip_state.setObjectName("t-chip")
+        for c in (self.chip_source, self.chip_album, self.chip_state):
+            c.setAlignment(Qt.AlignCenter)
+            c.setFixedSize(92, 22)
+            chips.addWidget(c)
+        chips.addStretch(1)
+        info.addLayout(chips)
+
+        # scrub seekable (klik / drag untuk lompat posisi)
+        self.scrub = QFrame()
+        self.scrub.setObjectName("scrub")
+        self.scrub.setFixedHeight(6)
+        self.scrub.setCursor(Qt.PointingHandCursor)
+        self.scrub.installEventFilter(self)
+        self.scrub_fill = QFrame(self.scrub)
+        self.scrub_fill.setObjectName("scrub-fill")
+        self.scrub_fill.setGeometry(0, 0, 0, 6)
+        info.addWidget(self.scrub)
+
+        times = QHBoxLayout()
+        self.time_now = QLabel("0:00")
+        self.time_now.setObjectName("t-tiny")
+        self.time_now.setFixedWidth(40)
+        self.time_len = QLabel("0:00")
+        self.time_len.setObjectName("t-tiny")
+        self.time_len.setFixedWidth(40)
+        self.seek_hint = QLabel("klik progress untuk seek")
+        self.seek_hint.setObjectName("t-tiny")
+        times.addWidget(self.time_now)
+        times.addWidget(self.seek_hint)
+        times.addStretch(1)
+        times.addWidget(self.time_len)
+        info.addLayout(times)
+
+        hlay.addLayout(info, 1)
+        lay.addWidget(hero)
+
+        # baris kontrol: transport + shuffle + loop
+        ctl_row = QHBoxLayout()
+        ctl_row.setSpacing(10)
+
+        seg = QFrame()
+        seg.setObjectName("seg")
+        slay = QHBoxLayout(seg)
+        slay.setContentsMargins(4, 2, 4, 2)
+        slay.setSpacing(2)
+        for label, sig, tip in (
+            ("⏮", self.prev_clicked, "Sebelumnya"),
+            ("⏯", self.play_pause_clicked, "Play / Pause"),
+            ("⏭", self.next_clicked, "Berikutnya"),
+        ):
+            btn = QLabel(label)
+            btn.setObjectName("seg-btn")
+            btn.setAlignment(Qt.AlignCenter)
+            btn.setFixedSize(38, 32)
+            btn.setToolTip(tip)
+            btn.installEventFilter(self)
+            btn.setProperty("sig", sig)
+            slay.addWidget(btn)
+        ctl_row.addWidget(seg)
+
+        self.btn_shuffle = QLabel("⇄")
+        self.btn_shuffle.setObjectName("toggle-btn")
+        self.btn_shuffle.setAlignment(Qt.AlignCenter)
+        self.btn_shuffle.setFixedSize(38, 32)
+        self.btn_shuffle.setToolTip("Shuffle")
+        self.btn_shuffle.installEventFilter(self)
+        self.btn_shuffle.setProperty("media_action", "shuffle")
+        ctl_row.addWidget(self.btn_shuffle)
+
+        self.btn_loop = QLabel("↻")
+        self.btn_loop.setObjectName("toggle-btn")
+        self.btn_loop.setAlignment(Qt.AlignCenter)
+        self.btn_loop.setFixedSize(38, 32)
+        self.btn_loop.setToolTip("Repeat: None → Playlist → Track")
+        self.btn_loop.installEventFilter(self)
+        self.btn_loop.setProperty("media_action", "loop")
+        ctl_row.addWidget(self.btn_loop)
+
+        ctl_row.addStretch(1)
+        lay.addLayout(ctl_row)
+
+        # waveform besar sebagai centerpiece
+        wave_card = QFrame()
+        wave_card.setObjectName("footer")
+        wlay = QHBoxLayout(wave_card)
+        wlay.setContentsMargins(14, 10, 14, 10)
+        wlay.setSpacing(10)
+        self.music_wave = self._make_wave(36, base=44)
+        wlay.addWidget(self.music_wave)
+        self.music_status = QLabel("Siap — putar musik untuk memulai")
+        self.music_status.setObjectName("foot-note")
+        self.music_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        wlay.addWidget(self.music_status, 1)
+        lay.addWidget(wave_card)
+
+        lay.addStretch(1)
+        return page
+
+    # ============================================================ PAGE: SISTEM
+    def _build_page_system(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        tiles = QHBoxLayout()
+        tiles.setSpacing(10)
+        self.tile_vol = self._tile("VOL", "Volume", C.ACCENT)
+        self.tile_bat = self._tile("BAT", "Battery", C.ACCENT_GREEN)
+        self.tile_cpu = self._tile("CPU", "Processor", C.ACCENT2)
+        self.tile_ram = self._tile("RAM", "Memory", C.ACCENT_WARM)
+
+        self.vol_slider = QSlider(Qt.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setFixedHeight(16)
+        self.vol_slider.valueChanged.connect(self.volume_changed.emit)
+        self.tile_vol["body"].addWidget(self.vol_slider)
+
+        for t in (self.tile_vol, self.tile_bat, self.tile_cpu, self.tile_ram):
+            tiles.addWidget(t["frame"], 1)
+        lay.addLayout(tiles)
+
+        # strip timer — digabung ke Sistem (elemennya sedikit, tak perlu tab sendiri)
+        tstrip = QFrame()
+        tstrip.setObjectName("timer-strip")
+        tlay = QHBoxLayout(tstrip)
+        tlay.setContentsMargins(12, 8, 12, 8)
+        tlay.setSpacing(8)
+
+        self.timer_icon = QLabel("⏱")
+        self.timer_icon.setObjectName("t-icon")
+        tlay.addWidget(self.timer_icon)
+
+        self.timer_label = QLabel("Timer")
+        self.timer_label.setObjectName("t-label")
+        tlay.addWidget(self.timer_label)
+
+        self.timer_value = QLabel("00:00")
+        self.timer_value.setObjectName("t-value")
+        tlay.addWidget(self.timer_value)
+
+        self.timer_prog = QFrame()
+        self.timer_prog.setObjectName("scrub")
+        self.timer_prog.setFixedHeight(4)
+        self.timer_prog_fill = QFrame(self.timer_prog)
+        self.timer_prog_fill.setObjectName("scrub-fill")
+        self.timer_prog_fill.setGeometry(0, 0, 0, 4)
+        tlay.addWidget(self.timer_prog, 1)
+
+        for minutes, name in ((5, "5m"), (15, "15m"), (25, "25m"), (50, "50m")):
+            chip = QLabel(name)
+            chip.setObjectName("t-chip")
+            chip.setAlignment(Qt.AlignCenter)
+            chip.setFixedSize(34, 24)
+            chip.installEventFilter(self)
+            chip.setProperty("preset", minutes)
+            tlay.addWidget(chip)
+
+        for label, action, tip in (
+            ("▶", "toggle", "Start / Pause"),
+            ("⟲", "reset", "Reset"),
+        ):
+            btn = QLabel(label)
+            btn.setObjectName("seg-btn")
+            btn.setAlignment(Qt.AlignCenter)
+            btn.setFixedSize(30, 24)
+            btn.setToolTip(tip)
+            btn.installEventFilter(self)
+            btn.setProperty("timer_action", action)
+            tlay.addWidget(btn)
+
+        lay.addWidget(tstrip)
+
+        note = QLabel("Nilai diperbarui otomatis · slider volume langsung bekerja")
+        note.setObjectName("t-tiny")
+        note.setAlignment(Qt.AlignCenter)
+        lay.addWidget(note)
+        lay.addStretch(1)
+        return page
+
+    def _set_chips(self, np) -> None:
+        if not hasattr(self, "chip_source"):
+            return
+        if np is None:
+            self.chip_source.setText("—")
+            self.chip_album.setText("—")
+            self.chip_state.setText("idle")
+            self.btn_shuffle.setStyleSheet("")
+            self.btn_loop.setStyleSheet("")
+            self.btn_loop.setText("↻")
+            self.btn_shuffle.setEnabled(False)
+            self.btn_loop.setEnabled(False)
+            return
+        self.chip_source.setText(np.identity or "—")
+        self.chip_album.setText((np.album or "no album")[:28] or "—")
+        self.chip_state.setText("playing" if np.playing else "paused")
+        # state toggle shuffle/loop — hormati dukungan pemutar
+        on = "background: rgba(110,139,255,0.35); color: #F4F4F8;"
+        player = np.identity or "pemutar ini"
+
+        self.btn_shuffle.setEnabled(bool(np.can_shuffle))
+        if np.can_shuffle:
+            self.btn_shuffle.setToolTip("Shuffle")
+            self.btn_shuffle.setStyleSheet(on if np.shuffle else "")
+        else:
+            self.btn_shuffle.setToolTip(
+                f"Shuffle tidak didukung {player} (butuh Spotify/VLC/mpv)")
+            self.btn_shuffle.setStyleSheet("color: rgba(255,255,255,0.25);")
+
+        self.btn_loop.setEnabled(bool(np.can_loop))
+        if np.can_loop:
+            loop_txt = {"None": "↻", "Track": "①", "Playlist": "∞"}.get(np.loop_status, "↻")
+            self.btn_loop.setText(loop_txt)
+            self.btn_loop.setToolTip("Repeat: None → Playlist → Track")
+            self.btn_loop.setStyleSheet(on if np.loop_status != "None" else "")
+        else:
+            self.btn_loop.setText("↻")
+            self.btn_loop.setToolTip(
+                f"Repeat tidak didukung {player} (butuh Spotify/VLC/mpv)")
+            self.btn_loop.setStyleSheet("color: rgba(255,255,255,0.25);")
+
+    # ------------------------------------------------------------ tab nav
+    def switch_tab(self, delta: int) -> None:
+        total = self.pages.count()
+        self._set_tab((self._tab_index + int(delta)) % total)
+
+    def _set_tab(self, index: int) -> None:
+        index = max(0, min(self.pages.count() - 1, int(index)))
+        if index == self._tab_index or getattr(self, "_tab_busy", False):
+            return
+        from PySide6.QtCore import QPoint, QPropertyAnimation
+        from PySide6.QtCore import QEasingCurve
+
+        self._tab_busy = True
+        self._pending_tab = index
+        self._tab_dir = 1 if index > self._tab_index else -1
+        home = self.pages.pos()
+        self._pages_home = home
+
+        def phase_out_done() -> None:
+            self.pages.setCurrentIndex(self._pending_tab)
+            self._tab_index = self._pending_tab
+            self.tab_title.setText(self._tab_names[self._tab_index])
+            self.tab_dots.setText("".join(
+                "●" if i == self._tab_index else "○" for i in range(self.pages.count())))
+            start_pos = QPoint(home.x() + 48 * self._tab_dir, home.y())
+            self.pages.move(start_pos)
+            anim_in = QPropertyAnimation(self.pages, b"pos")
+            anim_in.setDuration(240)
+            anim_in.setEasingCurve(QEasingCurve.OutCubic)
+            anim_in.setStartValue(start_pos)
+            anim_in.setEndValue(home)
+            anim_in.finished.connect(self._tab_anim_done)
+            self._tab_group = anim_in
+            anim_in.start()
+
+        # slide-out ke arah navigasi, lalu slide-in dari arah sebaliknya
+        anim_out = QPropertyAnimation(self.pages, b"pos")
+        anim_out.setDuration(170)
+        anim_out.setEasingCurve(QEasingCurve.InCubic)
+        anim_out.setStartValue(home)
+        anim_out.setEndValue(QPoint(home.x() - 48 * self._tab_dir, home.y()))
+        anim_out.finished.connect(phase_out_done)
+        self._tab_group = anim_out
+        anim_out.start()
+
+    def _tab_anim_done(self) -> None:
+        self._tab_busy = False
+        self.pages.move(self._pages_home)
+
+    def wheelEvent(self, ev) -> None:
+        # scroll juga bisa ganti tab
+        if ev.angleDelta().y() < 0:
+            self.switch_tab(1)
+        else:
+            self.switch_tab(-1)
+        ev.accept()
 
     # ------------------------------------------------------------ helpers
     def _tile(self, tag: str, label: str, accent: str) -> dict:
@@ -295,7 +596,10 @@ class Activities(QWidget):
         return {"frame": frame, "val": val, "body": body}
 
     def _make_wave(self, count: int, base: int) -> QWidget:
+        # Ukuran box dikunci (fixed): animasi tinggi bar TIDAK boleh mengubah
+        # sizeHint container, jika tidak layout di sekitarnya ikut jitter.
         box = QWidget()
+        box.setAttribute(Qt.WA_LayoutUsesWidgetRect, True)
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(3)
@@ -308,6 +612,9 @@ class Activities(QWidget):
             bar.setFixedHeight(max(3, base // 3))
             lay.addWidget(bar, 0, Qt.AlignVCenter)
             bars.append(bar)
+        total_w = count * 3 + max(0, count - 1) * 3
+        box.setFixedSize(total_w, base)
+        box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         if not hasattr(self, "_waves"):
             self._waves = []
         self._waves.append((bars, base))
@@ -320,7 +627,114 @@ class Activities(QWidget):
             if sig:
                 sig.emit()
             return True
+        # ganti tab via panah kiri/kanan
+        if ev.type() == ev.Type.MouseButtonRelease and obj.property("tab_delta") is not None:
+            try:
+                delta = int(obj.property("tab_delta"))
+            except (TypeError, ValueError):
+                delta = 0
+            if delta:
+                self.switch_tab(delta)
+            return True
+        # shuffle / loop
+        if ev.type() == ev.Type.MouseButtonRelease and obj.property("media_action"):
+            action = str(obj.property("media_action"))
+            if action == "shuffle":
+                self.shuffle_clicked.emit()
+            elif action == "loop":
+                self.loop_clicked.emit()
+            return True
+        # seek pada progress bar
+        if obj is getattr(self, "scrub", None):
+            if ev.type() in (ev.Type.MouseButtonPress, ev.Type.MouseMove) and (
+                ev.buttons() & Qt.LeftButton or ev.type() == ev.Type.MouseButtonPress
+            ):
+                w = max(1, self.scrub.width())
+                frac = max(0.0, min(1.0, ev.position().x() / w))
+                self.seek_requested.emit(frac)
+                self._set_scrub(frac)
+                return True
+        # preset timer (menit)
+        if ev.type() == ev.Type.MouseButtonRelease and obj.property("preset"):
+            minutes = int(obj.property("preset"))
+            if self.timer is not None:
+                self.timer.start(minutes * 60, "Timer")
+                self.sneak_peek("toast", f"Timer {minutes} menit", "⏱", C.TOAST_MS, 15)
+            return True
+        # tombol aksi timer
+        if ev.type() == ev.Type.MouseButtonRelease and obj.property("timer_action"):
+            action = str(obj.property("timer_action"))
+            if action == "toggle":
+                self._timer_toggle()
+            elif action == "reset":
+                self._timer_reset()
+            return True
         return super().eventFilter(obj, ev)
+
+    # ------------------------------------------------------------ timer
+    def _timer_toggle(self) -> None:
+        if self.timer is None:
+            return
+        if self.timer.running:
+            self.timer.pause()
+        elif self.timer.active:
+            self.timer.resume()
+        else:
+            self.timer.start(25 * 60, "Pomodoro")
+
+    def _timer_reset(self) -> None:
+        if self.timer is not None:
+            self.timer.reset()
+
+    def _on_timer_changed(self) -> None:
+        if self.timer is None:
+            return
+        self.timer_label.setText(self.timer.label)
+        self.timer_value.setText(self.timer.text())
+        w = max(0, int(self.timer_prog.width() * self.timer.progress()))
+        self.timer_prog_fill.setGeometry(0, 0, w, 4)
+        self._refresh_compact()
+
+    # ------------------------------------------------------------ sneak-peek
+    def sneak_peek(self, kind: str, text: str, icon: str = "●",
+                   ms: int = C.TOAST_MS, prio: int = 10) -> None:
+        """Tampilkan pesan sekilas di pill (toast / HUD). Prioritas lebih tinggi menang."""
+        import time as _time
+
+        old = self._peek.get(kind)
+        if old and old[0] > prio:
+            return
+        self._peek[kind] = (prio, text, icon, int(_time.monotonic() * 1000) + ms)
+        self._refresh_compact()
+        # jadwalkan expiry paling dekat
+        self._peek_timer.start(min(ms, C.TOAST_MS))
+
+    def _peek_expire(self) -> None:
+        import time as _time
+
+        now = int(_time.monotonic() * 1000)
+        expired = [k for k, v in self._peek.items() if v[3] <= now]
+        for k in expired:
+            self._peek.pop(k, None)
+        self._refresh_compact()
+        if self._peek:
+            nearest = min(v[3] for v in self._peek.values()) - now
+            self._peek_timer.start(max(50, nearest))
+
+    def _refresh_compact(self) -> None:
+        # prioritas: peek (toast/hud) > timer > musik
+        if self._peek:
+            _prio, text, icon, _exp = max(self._peek.values(), key=lambda v: v[0])
+            self.compact_title.set_full_text(text)
+            self.compact_dot.setText(icon)
+            return
+        if self.timer is not None and self.timer.active:
+            icon = "⏸" if self.timer.running else "⏸"
+            self.compact_title.set_full_text(f"{self.timer.label}  {self.timer.text()}")
+            self.compact_dot.setText("▶" if self.timer.running else "⏸")
+            return
+        self.compact_title.set_full_text(self._base_title)
+        self.compact_dot.setText(self._base_icon)
 
     # ------------------------------------------------------------ morph
     def set_opacity_for(self, t: float) -> None:
@@ -343,7 +757,7 @@ class Activities(QWidget):
             return  # basi
         if not path:
             return
-        img = art_loader.load_thumbnail(path, self._art_size, radius=14)
+        img = art_loader.load_thumbnail(path, self._art_size, radius=16)
         if img is None:
             return
         self.art_label.setPixmap(QPixmap.fromImage(img))
@@ -356,7 +770,7 @@ class Activities(QWidget):
         self.art_label.setText("♪")
         self.art_label.setStyleSheet(
             f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {color},"
-            f" stop:1 #7C5CFF); border-radius: 14px; color: rgba(255,255,255,0.85);"
+            f" stop:1 #7C5CFF); border-radius: 16px; color: rgba(255,255,255,0.85);"
             f" font: 700 26px Sans;"
         )
         self._art_loaded_url = ""
@@ -379,8 +793,12 @@ class Activities(QWidget):
         self._playing = bool(np.playing)
         if self._has_media:
             label = np.title if not np.artist else f"{np.title} — {np.artist}"
-            self.compact_title.set_full_text(label)
-            self.compact_dot.setText("▶")
+            # sneak-peek saat lagu berganti (padanan sneakPeekEvent)
+            if getattr(self, "_last_title", None) not in (None, np.title):
+                self.sneak_peek("toast", label, "♪", C.TOAST_MS, 15)
+            self._last_title = np.title
+            self._base_title = label
+            self._base_icon = "▶" if np.playing else "▶"
             self.title.set_full_text(np.title or "(no title)")
             self.artist.set_full_text(np.artist or np.album or np.identity or "")
             self.time_now.setText(fmt_time(np.position))
@@ -393,9 +811,14 @@ class Activities(QWidget):
             parts = [p for p in (np.identity, np.album) if p]
             self.now_label.set_full_text(" · ".join(parts) if parts else "Media")
             self._update_art(np.art_url or "")
+            self._set_chips(np)
+            if hasattr(self, "music_status"):
+                state_txt = "Sedang diputar" if np.playing else "Dijeda"
+                self.music_status.setText(f"{state_txt} · {np.identity or ''} · {fmt_time(np.position)}")
         else:
-            self.compact_title.set_full_text("notchy")
-            self.compact_dot.setText("●")
+            self._last_title = None
+            self._base_title = "notchy"
+            self._base_icon = "●"
             self.title.set_full_text("Tidak ada musik")
             self.artist.set_full_text("Putar sesuatu di pemutar favoritmu")
             self.time_now.setText("0:00")
@@ -406,6 +829,11 @@ class Activities(QWidget):
             self.now_label.set_full_text("Live activities siap — hover untuk membuka")
             self._art_url = ""
             self._art_fallback(C.ACCENT_DEEP)
+            self._set_chips(np)
+            self._set_chips(None)
+            if hasattr(self, "music_status"):
+                self.music_status.setText("Siap — putar musik untuk memulai")
+        self._refresh_compact()
         self._sync_wave()
 
     def update_system(self, st) -> None:
@@ -430,6 +858,7 @@ class Activities(QWidget):
         self.clock_label.setText(st.time_str)
         self.date_label.setText(st.date_str)
         self.compact_clock.setText(st.time_str)
+        self._refresh_compact()
 
     def _set_scrub(self, frac: float) -> None:
         self._frac = max(0.0, min(1.0, frac or 0.0))

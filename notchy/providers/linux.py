@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import glob
 import os
+import threading
 import re
 import subprocess
 
@@ -83,6 +84,25 @@ class LinuxMedia:
         except DBusException:
             pass
 
+        shuffle = False
+        loop_status = "None"
+        can_shuffle = True
+        can_loop = True
+        # probe: baca properti opsional — Chrome/YouTube tidak menyediakannya
+        try:
+            shuffle = bool(props.Get("org.mpris.MediaPlayer2.Player", "Shuffle"))
+        except DBusException:
+            can_shuffle = False
+        try:
+            loop_status = str(props.Get("org.mpris.MediaPlayer2.Player", "LoopStatus"))
+        except DBusException:
+            can_loop = False
+        can_seek = True
+        try:
+            can_seek = bool(props.Get("org.mpris.MediaPlayer2.Player", "CanSeek"))
+        except DBusException:
+            pass
+
         self._obj = obj
         self._state = NowPlaying(
             available=True,
@@ -94,7 +114,13 @@ class LinuxMedia:
             position=pos,
             length=float(meta.get("mpris:length", 0) or 0) / 1e6,
             art_url=meta_get("mpris:artUrl", ""),
+            shuffle=shuffle,
+            loop_status=loop_status,
+            can_shuffle=can_shuffle,
+            can_loop=can_loop,
+            can_seek=can_seek,
         )
+        self._trackid = meta.get("mpris:trackid", "")
         return self._state
 
     def _iface(self):
@@ -125,6 +151,39 @@ class LinuxMedia:
                 iface.Previous()
             except DBusException:
                 pass
+
+    def seek(self, seconds: float) -> None:
+        if not self._obj:
+            return
+        trackid = getattr(self, "_trackid", "")
+        if not trackid:
+            return
+        try:
+            iface = dbus.Interface(self._obj, "org.mpris.MediaPlayer2.Player")
+            iface.SetPosition(dbus.ObjectPath(str(trackid)), dbus.Int64(int(seconds * 1e6)))
+        except DBusException:
+            pass
+
+    def set_shuffle(self, enabled: bool) -> None:
+        if not self._obj:
+            return
+        try:
+            props = dbus.Interface(self._obj, "org.freedesktop.DBus.Properties")
+            props.Set("org.mpris.MediaPlayer2.Player", "Shuffle", dbus.Boolean(enabled))
+        except DBusException:
+            pass
+
+    def cycle_loop(self) -> None:
+        """None → Playlist → Track → None (padanan tombol repeat)."""
+        if not self._obj:
+            return
+        order = {"None": "Playlist", "Playlist": "Track", "Track": "None"}
+        nxt = order.get(getattr(self._state, "loop_status", "None"), "None")
+        try:
+            props = dbus.Interface(self._obj, "org.freedesktop.DBus.Properties")
+            props.Set("org.mpris.MediaPlayer2.Player", "LoopStatus", dbus.String(nxt))
+        except DBusException:
+            pass
 
 
 class LinuxSystem:
@@ -182,6 +241,18 @@ class LinuxSystem:
         except Exception:
             pass
 
+        # brightness (sysfs backlight)
+        try:
+            cands = sorted(glob.glob("/sys/class/backlight/*/brightness"))
+            if cands:
+                base = os.path.dirname(cands[0])
+                cur = int(open(os.path.join(base, "brightness")).read().strip())
+                mx = int(open(os.path.join(base, "max_brightness")).read().strip())
+                if mx > 0:
+                    state.brightness = int(round(cur * 100.0 / mx))
+        except Exception:
+            pass
+
         import datetime
         now = datetime.datetime.now()
         state.time_str = now.strftime("%H:%M")
@@ -192,5 +263,55 @@ class LinuxSystem:
         value = max(0, min(100, int(value)))
         try:
             subprocess.run(["amixer", "set", "Master", f"{value}%"], capture_output=True, timeout=1.5)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------- notifikasi
+class NotificationMonitor:
+    """Menguping notifikasi desktop (org.freedesktop.Notifications.Notify).
+
+    Dipakai untuk sneak-peek di island (padanan 'Instant Notifications').
+    Berjalan di thread sendiri; callback dipanggil dari thread itu — pemanggil
+    wajib meneruskan ke main loop Qt (lihat IslandWindow).
+    """
+
+    def __init__(self, callback) -> None:
+        self._callback = callback
+        self._stop = False
+        self._thread = None
+
+    def start(self) -> None:
+        if not dbus:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True, name="notchy-notif")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def _run(self) -> None:
+        try:
+            bus = dbus.SessionBus()
+            bus.add_match_string(
+                "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
+                eavesdrop=True,
+            )
+            bus.add_message_filter(self._on_message)
+            while not self._stop:
+                bus.process(0.25)
+        except Exception:
+            # eavesdrop bisa ditolak beberapa konfigurasi — fitur mati sendiri
+            return
+
+    def _on_message(self, bus, msg) -> None:
+        try:
+            args = msg.get_args_list()
+            # Notify(app, replaces_id, app_icon, summary, body, actions, hints, timeout)
+            if len(args) >= 5:
+                summary = str(args[3] or "").strip()
+                body = str(args[4] or "").strip()
+                if summary or body:
+                    self._callback(summary, body)
         except Exception:
             pass

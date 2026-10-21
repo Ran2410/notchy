@@ -17,6 +17,11 @@ class NowPlaying:
     art_url: str = ""       # file:// | http(s):// | data: | path kosong
     can_next: bool = True
     can_prev: bool = True
+    shuffle: bool = False
+    loop_status: str = "None"   # None | Track | Playlist
+    can_shuffle: bool = False   # apakah pemutar mendukung set Shuffle
+    can_loop: bool = False      # apakah pemutar mendukung set LoopStatus
+    can_seek: bool = True
     _control: object = field(default=None, repr=False)
 
     @property
@@ -35,13 +40,17 @@ class SystemState:
     charging: bool = False
     cpu_percent: float = 0.0
     ram_percent: float = 0.0
+    brightness: int = -1        # -1 = tidak tersedia
     time_str: str = "--:--"
     date_str: str = ""
 
 
 class MediaController:
-    """Kontrak kontrol pemutar (play/pause/next/prev)."""
+    """Kontrak kontrol pemutar (play/pause/next/prev/seek/shuffle/loop)."""
 
     def play_pause(self) -> None: ...
     def next(self) -> None: ...
     def previous(self) -> None: ...
+    def seek(self, seconds: float) -> None: ...
+    def set_shuffle(self, enabled: bool) -> None: ...
+    def cycle_loop(self) -> None: ...

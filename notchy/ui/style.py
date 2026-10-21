@@ -97,6 +97,43 @@ ISLAND_QSS = f"""
 #foot-note {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: Sans; }}
 #big-clock {{ color: {C.TEXT}; font-weight: 700; font-size: 20px; font-family: Sans; }}
 
+#timer-strip {{
+    background: {C.TILE_BG};
+    border: 1px solid {C.GLASS_EDGE_SOFT};
+    border-radius: {C.RADIUS_TILE}px;
+}}
+#t-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: Sans; }}
+#t-label {{ color: {C.TEXT_DIM}; font-weight: 600; font-size: 11px; font-family: Sans; }}
+#t-value {{ color: {C.TEXT}; font-weight: 700; font-size: 18px; font-family: Sans; }}
+#t-chip {{
+    color: {C.TEXT_DIM};
+    background: rgba(255,255,255,0.07);
+    border-radius: 12px;
+    font-weight: 600; font-size: 11px; font-family: Sans;
+}}
+#t-chip:hover {{ background: rgba(255,255,255,0.14); color: {C.TEXT}; }}
+#t-value-big {{ color: {C.TEXT}; font-weight: 700; font-size: 44px; font-family: Sans; }}
+
+#tab-arrow {{
+    color: {C.TEXT_DIM};
+    background: rgba(255,255,255,0.06);
+    border: 1px solid {C.GLASS_EDGE_SOFT};
+    border-radius: 15px;
+    font-weight: 700; font-size: 18px; font-family: Sans;
+}}
+#tab-arrow:hover {{ background: rgba(255,255,255,0.14); color: {C.TEXT}; }}
+#tab-title {{ color: {C.TEXT}; font-weight: 700; font-size: 13px; font-family: Sans; }}
+#tab-dots {{ color: {C.ACCENT}; font-weight: 700; font-size: 10px; font-family: Sans; }}
+
+#toggle-btn {{
+    color: {C.TEXT};
+    background: rgba(255,255,255,0.06);
+    border: 1px solid {C.GLASS_EDGE_SOFT};
+    border-radius: 16px;
+    font-weight: 600; font-size: 13px; font-family: Sans;
+}}
+#toggle-btn:hover {{ background: rgba(255,255,255,0.13); }}
+
 QSlider::groove:horizontal {{
     background: rgba(255,255,255,0.12);
     height: 4px; border-radius: 2px;

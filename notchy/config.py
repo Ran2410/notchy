@@ -8,7 +8,7 @@ Padanan temuan REA boring.notch:
 
 # Geometri (closed = pill mungil ala Dynamic Island, open = panel bento)
 CLOSED_W, CLOSED_H = 264, 40
-OPEN_W, OPEN_H = 528, 328
+OPEN_W, OPEN_H = 528, 364
 TOP_MARGIN = 8
 SIDE_MIN_MARGIN = 24
 
@@ -43,3 +43,9 @@ CLOSE_DELAY_MS = 420
 POLL_MPRIS_MS = 900
 POLL_SYS_MS = 2500
 WAVE_TICK_MS = 70         # bar visualizer (AudioSpectrum analog)
+
+# Sneak-peek / HUD (padanan sneakPeekEvent + HUD volume/brightness)
+TOAST_MS = 3200           # notifikasi / sneak peek lagu
+HUD_MS = 1400             # HUD volume / brightness
+HUD_SUPPRESS_MS = 600     # abaikan perubahan volume sesaat setelah slider dikirim
+

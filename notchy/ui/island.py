@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from .. import config as C
 from ..providers import make_providers
+from ..timer import TimerController
 from .activities import Activities
 from .style import ISLAND_QSS
 
@@ -23,6 +24,9 @@ SHADOW_PAD = 0  # tanpa shadow — island = kotak murni
 
 
 class IslandWindow(QWidget):
+    # diteruskan dari thread notifikasi D-Bus ke main loop Qt
+    notif_received = Signal(str, str)
+
     def __init__(self) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setObjectName("Island")
@@ -34,8 +38,9 @@ class IslandWindow(QWidget):
         from ..providers.base import SystemState
 
         self.sys_state = SystemState()
+        self.timer_controller = TimerController(self)
 
-        self.activities = Activities(self)
+        self.activities = Activities(timer=self.timer_controller, parent=self)
         self.activities.setObjectName("island-bg")
         self.setStyleSheet(ISLAND_QSS)
 
@@ -47,6 +52,9 @@ class IslandWindow(QWidget):
         self._anim.setDuration(C.ANIM_MS)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._on_anim_frame)
+        # setelah morph selesai, cek posisi kursor (leaveEvent bisa terlewat
+        # saat jendela bergeser selama animasi)
+        self._anim.finished.connect(self._verify_pointer)
 
         self._t = 0.0
         self._target = 0.0
@@ -73,10 +81,37 @@ class IslandWindow(QWidget):
         self._poll_clock.timeout.connect(self._do_poll_clock)
         self._poll_clock.start()
 
+        # jaring pengaman: pastikan panel menutup walau leaveEvent terlewat
+        self._pointer_watch = QTimer(self)
+        self._pointer_watch.setInterval(800)
+        self._pointer_watch.timeout.connect(self._verify_pointer)
+        self._pointer_watch.start()
+
         self.activities.play_pause_clicked.connect(self.providers.media.play_pause)
         self.activities.next_clicked.connect(self.providers.media.next)
         self.activities.prev_clicked.connect(self.providers.media.previous)
-        self.activities.volume_changed.connect(self.providers.system.set_volume)
+        self.activities.volume_changed.connect(self._on_volume_slider)
+        self.activities.seek_requested.connect(self._on_seek)
+        self.activities.shuffle_clicked.connect(self._on_shuffle)
+        self.activities.loop_clicked.connect(self._on_loop)
+        self._last_np = None
+
+        # --- HUD volume/brightness: deteksi perubahan dari luar (tombol keyboard) ---
+        self._last_vol: int | None = None
+        self._last_bright: int | None = None
+        self._vol_set_at = 0.0  # timestamp set_volume via slider → redam HUD
+
+        # --- toast notifikasi desktop (Linux) ---
+        self.notif_received.connect(self._on_notif)
+        self._notif_mon = None
+        try:
+            from ..providers.linux import NotificationMonitor
+
+            if sys.platform.startswith("linux"):
+                self._notif_mon = NotificationMonitor(self._emit_notif)
+                self._notif_mon.start()
+        except Exception:
+            self._notif_mon = None
 
         self._do_poll_media()
         self._do_poll_sys()
@@ -186,14 +221,39 @@ class IslandWindow(QWidget):
         super().enterEvent(ev)
 
     def leaveEvent(self, ev) -> None:
-        # saat animasi morph jendela bergeser → leaveEvent palsu sering terpicu;
-        # abaikan, dan verifikasi posisi kursor sebelum menjadwalkan tutup
-        if self._anim.state() == QPropertyAnimation.Running:
-            super().leaveEvent(ev)
-            return
+        # SELALU catat bahwa kursor keluar — dulu event ini dibuang saat animasi
+        # berjalan, sehingga _pointer_inside nyangkut True dan panel tak pernah
+        # menutup sendiri.
         self._pointer_inside = False
         self._close_timer.start()
         super().leaveEvent(ev)
+
+    def changeEvent(self, ev) -> None:
+        # klik app lain → window kehilangan aktivasi → tutup panel
+        from PySide6.QtCore import QEvent
+
+        if ev.type() == QEvent.ActivationChange and not self.isActiveWindow():
+            # user beralih ke app lain → tutup seketika, abaikan pin
+            self._pinned = False
+            self._pointer_inside = False
+            self._close_timer.stop()
+            self._animate_to(0.0)
+        super().changeEvent(ev)
+
+    def _verify_pointer(self) -> None:
+        """Sinkronkan state kursor dengan posisi nyata, lalu jadwalkan tutup.
+
+        Penting: koreksi state yang nyangkut (mis. leaveEvent terlewat saat
+        morph) — jangan hanya menambah timer bila flag sudah False.
+        """
+        if self._t <= 0.01:
+            return
+        inside = self.geometry().contains(QCursor.pos())
+        self._pointer_inside = inside
+        if inside or self._pinned:
+            self._close_timer.stop()
+        else:
+            self._close_timer.start()
 
     def _close_now(self) -> None:
         # double-check: jangan tutup bila kursor masih di atas island
@@ -208,6 +268,14 @@ class IslandWindow(QWidget):
         if ev.button() == Qt.LeftButton and self._t < 0.15:
             self.toggle_pin()
         super().mousePressEvent(ev)
+
+    def keyPressEvent(self, ev) -> None:
+        # panah kiri/kanan juga memindah tab saat panel terbuka
+        if ev.key() in (Qt.Key_Left, Qt.Key_Right):
+            self.activities.switch_tab(-1 if ev.key() == Qt.Key_Left else 1)
+            ev.accept()
+            return
+        super().keyPressEvent(ev)
 
     def contextMenuEvent(self, ev) -> None:
         menu = QMenu(self)
@@ -235,11 +303,60 @@ class IslandWindow(QWidget):
     # ------------------------------------------------------------ poll
     def _do_poll_media(self) -> None:
         np = self.providers.media.refresh()
+        self._last_np = np
         self.activities.update_media(np)
 
+    def _on_seek(self, frac: float) -> None:
+        np = self._last_np
+        if np and np.available and np.length > 0:
+            self.providers.media.seek(frac * np.length)
+
+    def _on_shuffle(self) -> None:
+        np = self._last_np
+        if np and np.available:
+            self.providers.media.set_shuffle(not np.shuffle)
+
+    def _on_loop(self) -> None:
+        np = self._last_np
+        if np and np.available:
+            self.providers.media.cycle_loop()
+
     def _do_poll_sys(self) -> None:
+        import time as _time
+
         self.sys_state = self.providers.system.read(self.sys_state)
-        self.activities.update_system(self.sys_state)
+        st = self.sys_state
+
+        # HUD volume: perubahan dari tombol keyboard / mixer lain
+        if self._last_vol is not None and st.volume != self._last_vol:
+            if _time.monotonic() - self._vol_set_at > C.HUD_SUPPRESS_MS / 1000.0:
+                self.activities.sneak_peek("hud-vol", f"Volume  {st.volume}%", "♪",
+                                           C.HUD_MS, 20)
+        self._last_vol = st.volume
+
+        # HUD brightness (bila sysfs tersedia)
+        if st.brightness >= 0:
+            if self._last_bright is not None and st.brightness != self._last_bright:
+                self.activities.sneak_peek("hud-bright", f"Brightness  {st.brightness}%",
+                                           "☀", C.HUD_MS, 20)
+            self._last_bright = st.brightness
+
+        self.activities.update_system(st)
+
+    def _on_volume_slider(self, value: int) -> None:
+        import time as _time
+
+        self._vol_set_at = _time.monotonic()
+        self.providers.system.set_volume(value)
+        self._last_vol = value  # jangan HUD untuk perubahan dari slider sendiri
+
+    def _emit_notif(self, summary: str, body: str) -> None:
+        # dipanggil dari thread D-Bus → teruskan ke main loop Qt
+        self.notif_received.emit(summary, body)
+
+    def _on_notif(self, summary: str, body: str) -> None:
+        text = summary if not body else f"{summary} — {body}"
+        self.activities.sneak_peek("toast", text, "✦", C.TOAST_MS, 25)
 
     def _do_poll_clock(self) -> None:
         self.sys_state = self.providers.system.read(self.sys_state)

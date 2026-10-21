@@ -9,6 +9,7 @@ album art asli dari pemutar.
 
 ![closed](shots/01-closed.png)
 ![expanded](shots/02-expanded.png)
+![tabs](shots/05-tab-sistem.png)
 
 ## Dukungan OS
 
@@ -44,10 +45,25 @@ klik kanan → Quit · slider volume langsung bekerja.
 
 ## Fitur
 
-- **Pill compact** (`264×40`, rounded penuh) — ikon play, judul lagu (elipsis),
-  waveform mini, jam
-- **Panel expanded** (`528×328`) — kartu musik hero (thumbnail album asli,
-  progress, kontrol), bento tile VOL/BAT/CPU/RAM, footer waveform + jam besar
+- **Pill compact** (`264×40`, rounded penuh) — ikon status, teks fokus
+  (lagu / timer / toast), waveform mini, jam
+- **Panel expanded bertab** (`528×364`) — hanya fitur yang isinya banyak
+  dijadikan tab, diganti lewat **panah ‹ ›** (klik / keyboard kiri-kanan / scroll)
+  dengan animasi slide-out/slide-in (OutCubic):
+  - **♪ Musik** — kartu hero (thumbnail album 88px, judul, chips sumber/album/status),
+    **progress seekable** (klik untuk lompat posisi), kontrol transport +
+    **shuffle ⇄** + **repeat ↻**, waveform besar.
+    Tombol shuffle/repeat otomatis **nonaktif** bila pemutar tidak mendukung
+    (mis. YouTube di Chrome tidak mengekspos `Shuffle`/`LoopStatus` di MPRIS —
+    gunakan Spotify/VLC/mpv untuk fitur itu; seek & transport tetap jalan)
+  - **▦ Sistem** — tile VOL/BAT/CPU/RAM + strip timer/pomodoro
+- **Sneak-peek / toast** — notifikasi desktop (Linux, D-Bus
+  `org.freedesktop.Notifications`) dan judul saat lagu berganti tampil sekilas
+  di pill, dengan prioritas: toast > HUD > timer > musik
+- **HUD volume & brightness** — perubahan dari tombol keyboard/OS terdeteksi
+  dan tampil sebagai HUD ringkas di pill (bukan OSD bawaan)
+- **Timer / pomodoro** — preset 5/15/25/50 menit, play/pause/reset; sisa waktu
+  mengambil alih pill compact saat aktif, notifikasi saat selesai
 - **Morph fluid** — animasi geometry OutCubic 280 ms, radius otomatis
   pill ↔ rounded-rect
 - **Hover-to-expand**, auto-close setelah kursor keluar, klik untuk pin
@@ -76,9 +92,10 @@ notchy/providers/
     linux.py                MPRIS + amixer + /sys + /proc
     windows.py              SMTC (winsdk) + pycaw + psutil
 notchy/ui/
-    island.py               window, animasi morph, hover/close task
-    activities.py           compact pill ↔ expanded bento + waveform
+    island.py               window, animasi morph, hover/close, HUD & toast wiring
+    activities.py           compact pill ↔ expanded bertab (Musik/Sistem) + sneak-peek
     style.py                QSS dark-glass
+notchy/timer.py             kontrol timer/pomodoro
 legacy/gtk/                 implementasi GTK3 lama (Linux-only, referensi)
 scripts/capture_qt.py       uji visual → shots/
 shots/                      screenshot UI
