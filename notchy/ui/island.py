@@ -301,6 +301,7 @@ class IslandWindow(QWidget):
 
     # ------------------------------------------------------------ event
     def enterEvent(self, ev) -> None:
+        self.activities.wake_eyes()
         self._pointer_inside = True
         self._close_timer.stop()
         self._animate_to(1.0)
@@ -541,6 +542,17 @@ def run_qt() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("notchy")
+
+    # font Inter (design token) — bundel di assets/fonts
+    import os as _os
+    from PySide6.QtGui import QFont, QFontDatabase as _QFD
+
+    for _fname in ("Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf"):
+        _fp = _os.path.normpath(_os.path.join(
+            _os.path.dirname(_os.path.abspath(__file__)), "..", "..", "assets", "fonts", _fname))
+        if _os.path.isfile(_fp):
+            _QFD.addApplicationFont(_fp)
+    app.setFont(QFont("Inter", 10))
 
     import os as _os
     from PySide6.QtGui import QIcon as _QIcon

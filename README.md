@@ -2,10 +2,11 @@
 
 Aplikasi overlay top-center ala Dynamic Island, diport dari mekanisme
 **boring.notch v2.7.3** (aplikasi notch untuk MacBook) lewat analisis reverse-
-engineering pada binary shipped-nya. Visual mengikuti bahasa desain
-**glass bento ala Alcove** — pill mungil saat idle, panel kaca gelap berisi
-kartu musik + bento tiles + waveform saat dibuka, lengkap dengan thumbnail
-album art asli dari pemutar.
+engineering pada binary shipped-nya. Visual mengikuti design system
+**dark glass violet** (Stitch "Dynamic Island Companion") — capsule 328×42
+dengan album art + judul + waveform + chip waktu, state idle menampilkan
+**mata maskot** yang berkedip, panel musik dengan art besar + tombol play
+besar, serta lirik dengan **baris aktif pill violet + bar aksen + timestamp**.
 
 ## Dukungan OS
 

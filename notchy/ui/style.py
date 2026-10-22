@@ -14,39 +14,49 @@ ISLAND_QSS = f"""
     border: 1px solid rgba(255,255,255,0.10);
     border-radius: {C.RADIUS_ISLAND}px;
 }}
-#c-dot {{
+#c-art {{
     background: transparent;
-    padding: 0; margin: 0;
+    border-radius: 9px;
+}}
+#c-sub {{
+    color: {C.TEXT_FAINT};
+    font-weight: 500; font-size: 10px; font-family: "Inter";
+}}
+#c-time-chip {{
+    color: {C.TEXT};
+    background: rgba(255,255,255,0.07);
+    border-radius: 11px;
+    padding: 0 7px;
+    font-weight: 600; font-size: 10px; font-family: "Inter";
 }}
 #tab-logo {{ background: transparent; }}
-#c-title {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: Sans; }}
+#c-title {{ color: {C.TEXT}; font-weight: 600; font-size: 13px; font-family: "Inter"; }}
 #c-chip {{
     color: {C.TEXT_DIM};
     background: {C.TILE_BG};
     border-radius: 12px;
-    font-weight: 600; font-size: 11px; font-family: Sans;
+    font-weight: 600; font-size: 11px; font-family: "Inter";
 }}
-#c-clock {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: Sans; }}
+#c-clock {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: "Inter"; }}
 #c-sep {{ background: rgba(255,255,255,0.10); max-width: 1px; min-width: 1px; }}
 
 #hero {{
-    background: {C.TILE_BG};
-    border: 1px solid {C.GLASS_EDGE_SOFT};
-    border-radius: {C.RADIUS_TILE}px;
+    background: transparent;
+    border: none;
 }}
-#h-title {{ color: {C.TEXT}; font-weight: 700; font-size: 15px; font-family: Sans; }}
-#h-sub {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 12px; font-family: Sans; }}
+#h-title {{ color: {C.TEXT}; font-weight: 600; font-size: 18px; font-family: "Inter"; }}
+#h-sub {{ color: {C.TEXT_DIM}; font-weight: 400; font-size: 13px; font-family: "Inter"; }}
 #badge {{
     color: {C.ACCENT};
     background: rgba(110,139,255,0.16);
     border-radius: {C.RADIUS_PILL}px;
-    font-weight: 700; font-size: 9px; font-family: Sans;
+    font-weight: 700; font-size: 9px; font-family: "Inter";
 }}
 #badge[playing="true"] {{
     color: {C.ACCENT_GREEN};
     background: rgba(81,207,102,0.16);
 }}
-#t-tiny {{ color: {C.TEXT_FAINT}; font-weight: 500; font-size: 10px; font-family: Sans; }}
+#t-tiny {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 11px; font-family: "Inter"; }}
 
 #seg {{
     background: rgba(255,255,255,0.06);
@@ -58,7 +68,7 @@ ISLAND_QSS = f"""
     background: transparent;
     border: none;
     border-radius: {C.RADIUS_PILL}px;
-    font-weight: 600; font-size: 13px; font-family: Sans;
+    font-weight: 600; font-size: 13px; font-family: "Inter";
     min-width: 34px; max-width: 34px; min-height: 30px; max-height: 30px;
 }}
 #seg-btn:hover {{ background: rgba(255,255,255,0.12); }}
@@ -70,9 +80,9 @@ ISLAND_QSS = f"""
     border-radius: {C.RADIUS_TILE}px;
 }}
 #tile:hover {{ background: {C.TILE_BG_HOVER}; }}
-#tile-tag {{ color: {C.TEXT_FAINT}; font-weight: 700; font-size: 9px; font-family: Sans; }}
-#tile-val {{ color: {C.TEXT}; font-weight: 700; font-size: 22px; font-family: Sans; }}
-#tile-sub {{ color: {C.TEXT_FAINT}; font-weight: 500; font-size: 10px; font-family: Sans; }}
+#tile-tag {{ color: {C.TEXT_FAINT}; font-weight: 600; font-size: 11px; font-family: "Inter"; }}
+#tile-val {{ color: {C.TEXT}; font-weight: 600; font-size: 20px; font-family: "Inter"; }}
+#tile-sub {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 11px; font-family: "Inter"; }}
 
 #scrub {{ background: rgba(255,255,255,0.12); border-radius: 2px; max-height: 4px; min-height: 4px; }}
 #scrub-fill {{
@@ -82,56 +92,59 @@ ISLAND_QSS = f"""
 }}
 #wave {{
     background: qlineargradient(x1:0,y1:1,x2:0,y2:0,
-        stop:0 {C.ACCENT_DEEP}, stop:1 {C.ACCENT2});
+        stop:0 {C.ACCENT_DEEP}, stop:0.55 {C.ACCENT}, stop:1 {C.ACCENT_CYAN});
     border-radius: 2px;
-    min-width: 3px; max-width: 3px;
 }}
 #wave[dims="true"] {{ background: rgba(255,255,255,0.18); }}
 
 #footer {{
-    background: rgba(255,255,255,0.04);
-    border: 1px solid {C.GLASS_EDGE_SOFT};
-    border-radius: {C.RADIUS_TILE}px;
+    background: transparent;
+    border: none;
 }}
-#foot-note {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: Sans; }}
-#big-clock {{ color: {C.TEXT}; font-weight: 700; font-size: 20px; font-family: Sans; }}
+#divider {{
+    background: rgba(255,255,255,0.06);
+    border: none;
+    min-height: 1px; max-height: 1px;
+}}
+#foot-note {{ color: {C.TEXT_DIM}; font-weight: 400; font-size: 12px; font-family: "Inter"; }}
+#big-clock {{ color: {C.TEXT}; font-weight: 600; font-size: 22px; font-family: "Inter"; }}
 
 #timer-strip {{
     background: {C.TILE_BG};
     border: 1px solid {C.GLASS_EDGE_SOFT};
     border-radius: {C.RADIUS_TILE}px;
 }}
-#t-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: Sans; }}
-#t-label {{ color: {C.TEXT_DIM}; font-weight: 600; font-size: 11px; font-family: Sans; }}
-#t-value {{ color: {C.TEXT}; font-weight: 700; font-size: 18px; font-family: Sans; }}
+#t-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: "Inter"; }}
+#t-label {{ color: {C.TEXT_DIM}; font-weight: 600; font-size: 11px; font-family: "Inter"; }}
+#t-value {{ color: {C.TEXT}; font-weight: 600; font-size: 20px; font-family: "Inter"; }}
 #t-chip {{
     color: {C.TEXT_DIM};
     background: rgba(255,255,255,0.07);
     border-radius: 12px;
-    font-weight: 600; font-size: 11px; font-family: Sans;
+    font-weight: 600; font-size: 11px; font-family: "Inter";
 }}
 #t-chip:hover {{ background: rgba(255,255,255,0.14); color: {C.TEXT}; }}
-#t-value-big {{ color: {C.TEXT}; font-weight: 700; font-size: 44px; font-family: Sans; }}
+#t-value-big {{ color: {C.TEXT}; font-weight: 600; font-size: 40px; font-family: "Inter"; }}
 
 #tab-arrow {{
     color: {C.TEXT_DIM};
     background: rgba(255,255,255,0.06);
     border: 1px solid {C.GLASS_EDGE_SOFT};
     border-radius: 15px;
-    font-weight: 700; font-size: 18px; font-family: Sans;
+    font-weight: 700; font-size: 18px; font-family: "Inter";
 }}
 #tab-arrow:hover {{ background: rgba(255,255,255,0.14); color: {C.TEXT}; }}
-#tab-title {{ color: {C.TEXT}; font-weight: 700; font-size: 13px; font-family: Sans; }}
-#tab-dots {{ color: {C.ACCENT}; font-weight: 700; font-size: 10px; font-family: Sans; }}
+#tab-title {{ color: {C.TEXT}; font-weight: 700; font-size: 13px; font-family: "Inter"; }}
+#tab-dots {{ color: {C.ACCENT}; font-weight: 700; font-size: 10px; font-family: "Inter"; }}
 
 #toggle-btn {{
-    color: {C.TEXT};
-    background: rgba(255,255,255,0.06);
-    border: 1px solid {C.GLASS_EDGE_SOFT};
+    color: {C.TEXT_DIM};
+    background: transparent;
+    border: none;
     border-radius: 16px;
-    font-weight: 600; font-size: 13px; font-family: Sans;
+    font-weight: 600; font-size: 14px; font-family: "Inter";
 }}
-#toggle-btn:hover {{ background: rgba(255,255,255,0.13); }}
+#toggle-btn:hover {{ background: rgba(255,255,255,0.08); color: {C.TEXT}; }}
 
 /* --- tab Info: cuaca / unduhan --- */
 #info-card {{
@@ -140,18 +153,56 @@ ISLAND_QSS = f"""
     border-radius: {C.RADIUS_TILE}px;
 }}
 #info-card:hover {{ background: {C.TILE_BG_HOVER}; }}
-#wx-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 22px; font-family: Sans; }}
-#wx-temp {{ color: {C.TEXT}; font-weight: 700; font-size: 24px; font-family: Sans; }}
-#wx-text {{ color: {C.TEXT_DIM}; font-weight: 600; font-size: 12px; font-family: Sans; }}
-#info-tag {{ color: {C.TEXT_FAINT}; font-weight: 700; font-size: 9px; font-family: Sans; }}
-#ag-title {{ color: {C.TEXT}; font-weight: 600; font-size: 13px; font-family: Sans; }}
-#dl-name {{ color: {C.TEXT}; font-weight: 600; font-size: 12px; font-family: Sans; }}
-#c-temp {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: Sans; }}
-#h-title2 {{ color: {C.TEXT}; font-weight: 700; font-size: 12px; font-family: Sans; }}
+#wx-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 22px; font-family: "Inter"; }}
+#wx-temp {{ color: {C.TEXT}; font-weight: 600; font-size: 24px; font-family: "Inter"; }}
+#wx-text {{ color: {C.TEXT_DIM}; font-weight: 400; font-size: 13px; font-family: "Inter"; }}
+#info-tag {{ color: {C.TEXT_FAINT}; font-weight: 600; font-size: 11px; font-family: "Inter"; }}
+#ag-title {{ color: {C.TEXT}; font-weight: 600; font-size: 14px; font-family: "Inter"; }}
+#dl-name {{ color: {C.TEXT}; font-weight: 600; font-size: 12px; font-family: "Inter"; }}
+#c-temp {{ color: {C.TEXT_DIM}; font-weight: 700; font-size: 11px; font-family: "Inter"; }}
+#h-title2 {{ color: {C.TEXT}; font-weight: 700; font-size: 12px; font-family: "Inter"; }}
+#np-tag {{ color: {C.TEXT_FAINT}; font-weight: 600; font-size: 11px; font-family: "Inter"; }}
+#np-src {{ color: {C.TEXT_DIM}; font-weight: 400; font-size: 11px; font-family: "Inter"; }}
+#chip-btn {{
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+}}
+#chip-btn:hover {{ background: rgba(255,255,255,0.08); }}
+#sync-chip {{ background: transparent; border: none; }}
+#chip-btn-txt {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 12px; font-family: "Inter"; }}
+#play-big {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 {C.ACCENT_DEEP}, stop:1 {C.ACCENT2});
+    border-radius: 26px;
+    color: #12081f;
+    font-weight: 700; font-size: 17px; font-family: "Inter";
+}}
+#play-big:hover {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 {C.ACCENT}, stop:1 #d9ccff); }}
 #lyric-line {{
+    color: rgba(228,225,233,0.42);
+    background: transparent;
+    font-weight: 400; font-size: 14px; font-family: "Inter";
+}}
+#lyr-accent {{
+    background: {C.ACCENT};
+    border-radius: 2px;
+}}
+#lyr-time {{
     color: {C.TEXT_DIM};
-    font-weight: 500; font-size: 12px; font-family: Sans;
-    padding: 2px 0;
+    font-weight: 600; font-size: 9px; font-family: "Inter";
+}}
+#lyr-title {{ color: {C.TEXT}; font-weight: 600; font-size: 14px; font-family: "Inter"; }}
+#lyr-sub {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 12px; font-family: "Inter"; }}
+#lyr-dot {{ color: {C.ACCENT_GREEN}; font-size: 8px; font-family: "Inter"; }}
+#sync-dot {{ color: {C.ACCENT_GREEN}; font-size: 8px; font-family: "Inter"; }}
+#play-small {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 {C.ACCENT_DEEP}, stop:1 {C.ACCENT2});
+    border-radius: 18px;
+    color: #12081f;
+    font-weight: 700; font-size: 13px; font-family: "Inter";
 }}
 #lyrics-scroll, #lyrics-scroll QWidget,
 #lyrics-scroll QWidget#qt_scrollarea_viewport {{ background: transparent; }}
@@ -165,9 +216,9 @@ ISLAND_QSS = f"""
 #lyrics-scroll QScrollBar::add-line:vertical,
 #lyrics-scroll QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollArea {{ background: transparent; }}
-#h-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: Sans; }}
-#h-temp {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: Sans; }}
-#ag-row {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: Sans; }}
+#h-icon {{ color: {C.ACCENT_WARM}; font-weight: 700; font-size: 14px; font-family: "Inter"; }}
+#h-temp {{ color: {C.TEXT}; font-weight: 600; font-size: 11px; font-family: "Inter"; }}
+#ag-row {{ color: {C.TEXT_DIM}; font-weight: 500; font-size: 11px; font-family: "Inter"; }}
 
 QSlider::groove:horizontal {{
     background: rgba(255,255,255,0.12);

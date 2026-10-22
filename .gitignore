@@ -25,8 +25,9 @@ __pycache__/
 .cache/
 *.part
 
-# --- Screenshot lokal (tidak di-push) ---
+# --- Screenshot & referensi desain lokal (tidak di-push) ---
 shots/
+stitch_desktop_dynamic_island_redesign/
 
 # --- OS / editor ---
 .DS_Store

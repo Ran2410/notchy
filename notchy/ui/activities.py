@@ -77,6 +77,91 @@ ASSETS_DIR = os.path.normpath(os.path.join(
 LOGO_ICON = os.path.join(ASSETS_DIR, "notchy-icon.png")
 
 
+class LyricRow(QWidget):
+    """Baris lirik: latar pill digambar QPainter (satu-satunya background).
+    Anak-anaknya (teks & waktu) murni transparan — tanpa QSS background."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._active = False
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.setAutoFillBackground(False)
+
+    def set_active(self, active: bool) -> None:
+        if self._active != active:
+            self._active = active
+            self.update()
+
+    def paintEvent(self, ev) -> None:
+        if not self._active:
+            return
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor, QPainter
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(155, 135, 255, 51))   # 0.20 alpha
+        p.drawRoundedRect(self.rect(), 9, 9)
+        p.end()
+
+
+class EyesWidget(QWidget):
+    """Mata maskot untuk state idle (ala Nusa): berkedip, mengantuk, bangun saat hover."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(30, 22)
+        self._t = 0.0
+        self._blink_at = 2.5 + random.random() * 2.5
+        self._blink = 0.0
+        self._open = 1.0
+        self._last_wake = time.monotonic()
+        self._timer = QTimer(self)
+        self._timer.setInterval(60)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def wake(self) -> None:
+        self._last_wake = time.monotonic()
+        self._open = 1.0
+        self.update()
+
+    def _tick(self) -> None:
+        self._t += 0.06
+        if self._t > self._blink_at:
+            self._blink = 1.0
+            self._blink_at = self._t + 2.8 + random.random() * 3.2
+        if self._blink > 0:
+            self._blink = max(0.0, self._blink - 0.14)
+        idle_for = time.monotonic() - self._last_wake
+        target = 0.32 if idle_for > 35 else 1.0
+        self._open += (target - self._open) * 0.07
+        self.update()
+
+    def paintEvent(self, ev) -> None:
+        from PySide6.QtCore import QPointF, QRectF, Qt
+        from PySide6.QtGui import QColor, QPainter
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = self.width(), self.height()
+        openness = max(0.12, self._open * (1.0 - 0.88 * self._blink))
+        eye_w = 9.0
+        eye_h = 12.0 * openness
+        look = math.sin(self._t * 0.8) * 1.4
+        for cx in (w * 0.32, w * 0.68):
+            rect = QRectF(cx - eye_w / 2, h / 2 - eye_h / 2, eye_w, max(1.6, eye_h))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(228, 225, 233, 235))
+            p.drawRoundedRect(rect, eye_w / 2, eye_w / 2)
+            if openness > 0.55:
+                pr = 2.1
+                p.setBrush(QColor(24, 22, 34, 255))
+                p.drawEllipse(QPointF(cx + look, h / 2), pr, pr)
+        p.end()
+
+
 class EventOverlay(QWidget):
     """Efek 'wow' event headset: sonar rings + kilau sapuan + headphone
     yang menggambar diri mengelilingi logo. Digambar manual (QPainter),
@@ -216,7 +301,7 @@ class Activities(QWidget):
         self._playing = False
         self._art_url = ""
         self._art_loaded_url = ""
-        self._art_size = 88
+        self._art_size = 104
         self._sys_hint = "…"
         self._wave_level = 0.0
         self._frac = 0.0
@@ -330,47 +415,51 @@ class Activities(QWidget):
     def _build_compact(self) -> QWidget:
         row = QWidget()
         lay = QHBoxLayout(row)
-        lay.setContentsMargins(14, 0, 14, 0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 0, 12, 0)
+        lay.setSpacing(9)
 
-        self.compact_dot = QLabel()
-        self.compact_dot.setObjectName("c-dot")
-        self.compact_dot.setAlignment(Qt.AlignCenter)
-        self.compact_dot.setFixedHeight(22)
-        pm = self._logo_pixmap(20)
-        if not pm.isNull():
-            self.compact_dot.setPixmap(pm)
-            self.compact_dot.setFixedWidth(int(pm.width() * 20 / max(1, pm.height())))
-        else:
-            self.compact_dot.setText("●")
-            self.compact_dot.setFixedWidth(18)
-        lay.addWidget(self.compact_dot)
+        # slot kiri: art album (saat playing) atau mata maskot (idle)
+        self.compact_slot = QStackedWidget()
+        self.compact_slot.setFixedSize(34, 34)
 
+        self.compact_art = QLabel()
+        self.compact_art.setObjectName("c-art")
+        self.compact_art.setAlignment(Qt.AlignCenter)
+        self.compact_art.setFixedSize(32, 32)
+        self.compact_slot.addWidget(self.compact_art)
+
+        self.compact_eyes = EyesWidget()
+        self.compact_slot.addWidget(self.compact_eyes)
+        lay.addWidget(self.compact_slot)
+
+        # judul + subjudul
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        col.setContentsMargins(0, 0, 0, 0)
         self.compact_title = ElidedLabel("notchy")
         self.compact_title.setObjectName("c-title")
         self.compact_title.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        lay.addWidget(self.compact_title, 1)
+        col.addWidget(self.compact_title)
+        self.compact_sub = ElidedLabel("")
+        self.compact_sub.setObjectName("c-sub")
+        self.compact_sub.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        col.addWidget(self.compact_sub)
+        lay.addLayout(col, 1)
 
-        self.compact_wave = self._make_wave(3, base=10)
+        self.compact_wave = self._make_wave(4, base=16)
         lay.addWidget(self.compact_wave)
 
-        self.compact_temp = QLabel("")
-        self.compact_temp.setObjectName("c-temp")
-        self.compact_temp.setFixedWidth(34)
-        self.compact_temp.setFixedHeight(20)
-        self.compact_temp.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
-        self.compact_temp.hide()
-        lay.addWidget(self.compact_temp)
-
         self.compact_clock = QLabel("--:--")
-        self.compact_clock.setObjectName("c-clock")
-        self.compact_clock.setFixedHeight(20)
-        self.compact_clock.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
+        self.compact_clock.setObjectName("c-time-chip")
+        self.compact_clock.setAlignment(Qt.AlignCenter)
+        self.compact_clock.setFixedHeight(22)
         lay.addWidget(self.compact_clock)
 
-        # referensi agar tetap aman saat update (tidak lagi tampil di compact)
+        # referensi agar tetap aman saat update (tidak tampil di compact)
         self.compact_bat = QLabel("")
         self.compact_bat.hide()
+        self.compact_temp = QLabel("")
+        self.compact_temp.hide()
         return row
 
     # ============================================================ EXPANDED
@@ -462,6 +551,10 @@ class Activities(QWidget):
         clock_box.addWidget(self.date_label)
         flay.addLayout(clock_box)
 
+        divider = QFrame()
+        divider.setObjectName("divider")
+        lay.addWidget(divider)
+
         lay.addWidget(footer)
 
         self._tab_index = 0
@@ -475,19 +568,49 @@ class Activities(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
+        # header row ala design: ♪ NOW PLAYING · source   |   chip Lyrics
+        toprow = QHBoxLayout()
+        toprow.setSpacing(8)
+        self.np_tag = QLabel("♪  NOW PLAYING")
+        self.np_tag.setObjectName("np-tag")
+        toprow.addWidget(self.np_tag)
+        self.np_source = QLabel("—")
+        self.np_source.setObjectName("np-src")
+        toprow.addWidget(self.np_source)
+        toprow.addStretch(1)
+
+        self.lyrics_chip = QFrame()
+        self.lyrics_chip.setObjectName("chip-btn")
+        self.lyrics_chip.setCursor(Qt.PointingHandCursor)
+        self.lyrics_chip.installEventFilter(self)
+        self.lyrics_chip.setProperty("lyrics_toggle", True)
+        _cl = QHBoxLayout(self.lyrics_chip)
+        _cl.setContentsMargins(9, 0, 11, 0)
+        _cl.setSpacing(6)
+        _lic = QLabel()
+        _lpm = QPixmap(os.path.join(ASSETS_DIR, "lyrics-icon.png"))
+        if not _lpm.isNull():
+            _lic.setPixmap(_lpm.scaledToHeight(12, Qt.SmoothTransformation))
+        _cl.addWidget(_lic)
+        _ltxt = QLabel("Lyrics")
+        _ltxt.setObjectName("chip-btn-txt")
+        _cl.addWidget(_ltxt)
+        toprow.addWidget(self.lyrics_chip)
+        lay.addLayout(toprow)
+
         hero = QFrame()
         hero.setObjectName("hero")
         hlay = QHBoxLayout(hero)
         hlay.setContentsMargins(14, 14, 14, 14)
         hlay.setSpacing(16)
 
-        # art lebih besar
+        # art lebih besar (design: 104)
         self.art_label = QLabel("♪")
-        self.art_label.setFixedSize(88, 88)
+        self.art_label.setFixedSize(104, 104)
         self.art_label.setAlignment(Qt.AlignCenter)
         self.art_label.setStyleSheet(
             f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
-            f" stop:1 #7C5CFF); border-radius: 16px; color: rgba(255,255,255,0.85);"
+            f" stop:1 #7C5CFF); border-radius: 18px; color: rgba(255,255,255,0.85);"
             f" font: 700 30px Sans;"
         )
         hlay.addWidget(self.art_label, 0, Qt.AlignVCenter)
@@ -522,10 +645,9 @@ class Activities(QWidget):
             c.setFixedSize(92, 22)
             chips.addWidget(c)
         chips.addStretch(1)
-        info.addLayout(chips)
+        # chips tidak ditampilkan lagi (design lebih bersih)
 
-        # jarak ekstra chips → progress bar (biar tidak menempel)
-        info.addSpacing(12)
+        info.addSpacing(6)
 
         # scrub seekable (klik / drag untuk lompat posisi)
         self.scrub = QFrame()
@@ -545,10 +667,9 @@ class Activities(QWidget):
         self.time_len = QLabel("0:00")
         self.time_len.setObjectName("t-tiny")
         self.time_len.setFixedWidth(40)
-        self.seek_hint = QLabel("klik progress untuk seek")
-        self.seek_hint.setObjectName("t-tiny")
+        self.seek_hint = QLabel("")
+        self.seek_hint.hide()
         times.addWidget(self.time_now)
-        times.addWidget(self.seek_hint)
         times.addStretch(1)
         times.addWidget(self.time_len)
         info.addLayout(times)
@@ -556,61 +677,54 @@ class Activities(QWidget):
         hlay.addLayout(info, 1)
         lay.addWidget(hero)
 
-        # baris kontrol: transport + shuffle + loop
+        # baris kontrol ala design: ⇄ ⏮ [play besar] ⏭ ↻
         ctl_row = QHBoxLayout()
-        ctl_row.setSpacing(10)
-
-        seg = QFrame()
-        seg.setObjectName("seg")
-        slay = QHBoxLayout(seg)
-        slay.setContentsMargins(4, 2, 4, 2)
-        slay.setSpacing(2)
-        for label, sig, tip in (
-            ("⏮", self.prev_clicked, "Sebelumnya"),
-            ("⏯", self.play_pause_clicked, "Play / Pause"),
-            ("⏭", self.next_clicked, "Berikutnya"),
-        ):
-            btn = QLabel(label)
-            btn.setObjectName("seg-btn")
-            btn.setAlignment(Qt.AlignCenter)
-            btn.setFixedSize(38, 32)
-            btn.setToolTip(tip)
-            btn.installEventFilter(self)
-            btn.setProperty("sig", sig)
-            slay.addWidget(btn)
-        ctl_row.addWidget(seg)
+        ctl_row.setSpacing(12)
 
         self.btn_shuffle = QLabel("⇄")
         self.btn_shuffle.setObjectName("toggle-btn")
         self.btn_shuffle.setAlignment(Qt.AlignCenter)
-        self.btn_shuffle.setFixedSize(38, 32)
+        self.btn_shuffle.setFixedSize(40, 34)
         self.btn_shuffle.setToolTip("Shuffle")
         self.btn_shuffle.installEventFilter(self)
         self.btn_shuffle.setProperty("media_action", "shuffle")
         ctl_row.addWidget(self.btn_shuffle)
 
+        btn_prev = QLabel("⏮")
+        btn_prev.setObjectName("seg-btn")
+        btn_prev.setAlignment(Qt.AlignCenter)
+        btn_prev.setFixedSize(40, 34)
+        btn_prev.setToolTip("Sebelumnya")
+        btn_prev.installEventFilter(self)
+        btn_prev.setProperty("sig", self.prev_clicked)
+        ctl_row.addWidget(btn_prev)
+
+        self.btn_play_big = QLabel("▶")
+        self.btn_play_big.setObjectName("play-big")
+        self.btn_play_big.setAlignment(Qt.AlignCenter)
+        self.btn_play_big.setFixedSize(52, 52)
+        self.btn_play_big.setToolTip("Play / Pause")
+        self.btn_play_big.installEventFilter(self)
+        self.btn_play_big.setProperty("sig", self.play_pause_clicked)
+        ctl_row.addWidget(self.btn_play_big)
+
+        btn_next = QLabel("⏭")
+        btn_next.setObjectName("seg-btn")
+        btn_next.setAlignment(Qt.AlignCenter)
+        btn_next.setFixedSize(40, 34)
+        btn_next.setToolTip("Berikutnya")
+        btn_next.installEventFilter(self)
+        btn_next.setProperty("sig", self.next_clicked)
+        ctl_row.addWidget(btn_next)
+
         self.btn_loop = QLabel("↻")
         self.btn_loop.setObjectName("toggle-btn")
         self.btn_loop.setAlignment(Qt.AlignCenter)
-        self.btn_loop.setFixedSize(38, 32)
+        self.btn_loop.setFixedSize(40, 34)
         self.btn_loop.setToolTip("Repeat: None → Playlist → Track")
         self.btn_loop.installEventFilter(self)
         self.btn_loop.setProperty("media_action", "loop")
         ctl_row.addWidget(self.btn_loop)
-
-        self.btn_lyrics = QLabel()
-        self.btn_lyrics.setObjectName("toggle-btn")
-        self.btn_lyrics.setAlignment(Qt.AlignCenter)
-        self.btn_lyrics.setFixedSize(40, 32)
-        self.btn_lyrics.setToolTip("Tampilkan lirik tersinkron")
-        self.btn_lyrics.installEventFilter(self)
-        self.btn_lyrics.setProperty("lyrics_toggle", True)
-        _pm = QPixmap(os.path.join(ASSETS_DIR, "lyrics-icon.png"))
-        if not _pm.isNull():
-            self.btn_lyrics.setPixmap(_pm.scaledToHeight(17, Qt.SmoothTransformation))
-        else:
-            self.btn_lyrics.setText("LIRIK")
-        ctl_row.addWidget(self.btn_lyrics)
 
         ctl_row.addStretch(1)
         lay.addLayout(ctl_row)
@@ -621,12 +735,12 @@ class Activities(QWidget):
         wlay = QHBoxLayout(wave_card)
         wlay.setContentsMargins(14, 10, 14, 10)
         wlay.setSpacing(10)
-        self.music_wave = self._make_wave(36, base=44)
+        self.music_wave = self._make_wave(34, base=40, bar_w=4)
+        wlay.addStretch(1)
         wlay.addWidget(self.music_wave)
-        self.music_status = QLabel("Siap — putar musik untuk memulai")
-        self.music_status.setObjectName("foot-note")
-        self.music_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        wlay.addWidget(self.music_status, 1)
+        wlay.addStretch(1)
+        self.music_status = QLabel("")
+        self.music_status.hide()
         lay.addWidget(wave_card)
 
         lay.addStretch(1)
@@ -647,168 +761,60 @@ class Activities(QWidget):
     # ============================================================ LIRIK
     def _build_music_lyrics(self) -> QWidget:
         page = QWidget()
-        lay = QHBoxLayout(page)
+        lay = QVBoxLayout(page)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(8)
 
-        # ---- kiri: pemutar ringkas ----
-        left = QWidget()
-        left.setFixedWidth(176)
-        lv = QVBoxLayout(left)
-        lv.setContentsMargins(0, 0, 0, 0)
-        lv.setSpacing(7)
+        # ---------- header: art + judul/dot + artist/album + chip Music View ----------
+        header = QHBoxLayout()
+        header.setSpacing(10)
 
-        top = QHBoxLayout()
-        top.setSpacing(10)
         self.art2 = QLabel("♪")
-        self.art2.setFixedSize(56, 56)
+        self.art2.setFixedSize(40, 40)
         self.art2.setAlignment(Qt.AlignCenter)
         self.art2.setStyleSheet(
             f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
-            f" stop:1 #7C5CFF); border-radius: 12px; color: rgba(255,255,255,0.85);"
-            f" font-weight: 700; font-size: 20px; font-family: Sans;")
-        top.addWidget(self.art2)
+            f" stop:1 {C.ACCENT2}); border-radius: 10px; color: rgba(255,255,255,0.85);"
+            f" font-weight: 700; font-size: 16px; font-family: Sans;")
+        header.addWidget(self.art2)
 
         meta = QVBoxLayout()
-        meta.setSpacing(2)
-        self.title2 = ElidedLabel("—")
-        self.title2.setObjectName("h-title2")
-        self.artist2 = ElidedLabel("")
-        self.artist2.setObjectName("t-tiny")
-        meta.addWidget(self.title2)
-        meta.addWidget(self.artist2)
-        meta.addStretch(1)
-        top.addLayout(meta, 1)
-        lv.addLayout(top)
-        lv.addSpacing(5)   # jarak art → progress bar
-
-        self.scrub2 = QFrame()
-        self.scrub2.setObjectName("scrub")
-        self.scrub2.setFixedHeight(5)
-        self.scrub2_fill = QFrame(self.scrub2)
-        self.scrub2_fill.setObjectName("scrub-fill")
-        self.scrub2_fill.setGeometry(0, 0, 0, 5)
-        lv.addWidget(self.scrub2)
-
-        times2 = QHBoxLayout()
-        self.time2_now = QLabel("0:00")
-        self.time2_now.setObjectName("t-tiny")
-        self.time2_len = QLabel("0:00")
-        self.time2_len.setObjectName("t-tiny")
-        times2.addWidget(self.time2_now)
-        times2.addStretch(1)
-        times2.addWidget(self.time2_len)
-        lv.addLayout(times2)
-
-        seg2 = QFrame()
-        seg2.setObjectName("seg")
-        sl2 = QHBoxLayout(seg2)
-        sl2.setContentsMargins(2, 2, 2, 2)
-        sl2.setSpacing(0)
-        for label, sig, tip in (
-            ("⏮", self.prev_clicked, "Sebelumnya"),
-            ("⏯", self.play_pause_clicked, "Play / Pause"),
-            ("⏭", self.next_clicked, "Berikutnya"),
-        ):
-            btn = QLabel(label)
-            btn.setObjectName("seg-btn")
-            btn.setAlignment(Qt.AlignCenter)
-            btn.setFixedSize(44, 30)
-            btn.setToolTip(tip)
-            btn.installEventFilter(self)
-            btn.setProperty("sig", sig)
-            sl2.addWidget(btn)
-        lv.addWidget(seg2)
-
-        # baris toggle: shuffle · loop · kembali
+        meta.setSpacing(1)
         trow = QHBoxLayout()
         trow.setSpacing(6)
+        self.title2 = ElidedLabel("—")
+        self.title2.setObjectName("lyr-title")
+        trow.addWidget(self.title2, 1)
+        self.dot2 = QLabel("●")
+        self.dot2.setObjectName("lyr-dot")
+        trow.addWidget(self.dot2)
+        trow.addStretch(0)
+        meta.addLayout(trow)
+        self.artist2 = ElidedLabel("")
+        self.artist2.setObjectName("lyr-sub")
+        meta.addWidget(self.artist2)
+        header.addLayout(meta, 1)
 
-        self.btn_shuffle2 = QLabel("⇄")
-        self.btn_shuffle2.setObjectName("toggle-btn")
-        self.btn_shuffle2.setAlignment(Qt.AlignCenter)
-        self.btn_shuffle2.setFixedSize(40, 28)
-        self.btn_shuffle2.setToolTip("Shuffle")
-        self.btn_shuffle2.installEventFilter(self)
-        self.btn_shuffle2.setProperty("media_action", "shuffle")
-        trow.addWidget(self.btn_shuffle2)
-
-        self.btn_loop2 = QLabel("↻")
-        self.btn_loop2.setObjectName("toggle-btn")
-        self.btn_loop2.setAlignment(Qt.AlignCenter)
-        self.btn_loop2.setFixedSize(40, 28)
-        self.btn_loop2.setToolTip("Repeat: None → Playlist → Track")
-        self.btn_loop2.installEventFilter(self)
-        self.btn_loop2.setProperty("media_action", "loop")
-        trow.addWidget(self.btn_loop2)
-
-        self.btn_back = QLabel()
-        self.btn_back.setObjectName("toggle-btn")
-        self.btn_back.setAlignment(Qt.AlignCenter)
-        self.btn_back.setFixedSize(40, 28)
-        self.btn_back.setToolTip("Kembali ke pemutar musik")
+        self.btn_back = QFrame()
+        self.btn_back.setObjectName("chip-btn")
+        self.btn_back.setCursor(Qt.PointingHandCursor)
         self.btn_back.installEventFilter(self)
         self.btn_back.setProperty("lyrics_toggle", True)
-        _pmb = QPixmap(os.path.join(ASSETS_DIR, "music-icon.png"))
-        if not _pmb.isNull():
-            self.btn_back.setPixmap(_pmb.scaledToHeight(17, Qt.SmoothTransformation))
-        else:
-            self.btn_back.setText("‹ Musik")
-        trow.addWidget(self.btn_back)
-        trow.addStretch(1)
-        lv.addLayout(trow)
+        bl = QHBoxLayout(self.btn_back)
+        bl.setContentsMargins(10, 0, 12, 0)
+        bl.setSpacing(6)
+        _bpm = QPixmap(os.path.join(ASSETS_DIR, "music-icon.png"))
+        _bic = QLabel()
+        if not _bpm.isNull():
+            _bic.setPixmap(_bpm.scaledToHeight(12, Qt.SmoothTransformation))
+        bl.addWidget(_bic)
+        _btxt = QLabel("Music View")
+        _btxt.setObjectName("chip-btn-txt")
+        bl.addWidget(_btxt)
+        header.addWidget(self.btn_back)
+        lay.addLayout(header)
 
-        # volume
-        volrow = QHBoxLayout()
-        volrow.setSpacing(6)
-        vlbl = QLabel("VOL")
-        vlbl.setObjectName("t-tiny")
-        vlbl.setFixedWidth(24)
-        volrow.addWidget(vlbl)
-        self.vol_slider2 = QSlider(Qt.Horizontal)
-        self.vol_slider2.setRange(0, 100)
-        self.vol_slider2.setFixedHeight(16)
-        self.vol_slider2.valueChanged.connect(self.volume_changed.emit)
-        volrow.addWidget(self.vol_slider2, 1)
-        self.vol_pct2 = QLabel("—")
-        self.vol_pct2.setObjectName("t-tiny")
-        self.vol_pct2.setFixedWidth(34)
-        self.vol_pct2.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        volrow.addWidget(self.vol_pct2)
-        lv.addLayout(volrow)
-
-        # waveform mini — hidup saat musik berjalan
-        wave2_card = QFrame()
-        wave2_card.setObjectName("footer")
-        w2l = QHBoxLayout(wave2_card)
-        w2l.setContentsMargins(10, 6, 10, 6)
-        w2l.setSpacing(0)
-        w2l.addStretch(1)
-        self.music_wave2 = self._make_wave(16, base=22)
-        w2l.addWidget(self.music_wave2)
-        w2l.addStretch(1)
-        lv.addWidget(wave2_card)
-
-        lv.addStretch(1)
-
-        lay.addWidget(left)
-
-        # ---- kanan: daftar lirik ----
-        right = QWidget()
-        rv = QVBoxLayout(right)
-        rv.setContentsMargins(0, 0, 0, 0)
-        rv.setSpacing(6)
-
-        rhead = QHBoxLayout()
-        rtag = QLabel("LIRIK")
-        rtag.setObjectName("info-tag")
-        rhead.addWidget(rtag)
-        rhead.addStretch(1)
-        self.lyrics_state = QLabel("")
-        self.lyrics_state.setObjectName("t-tiny")
-        rhead.addWidget(self.lyrics_state)
-        rv.addLayout(rhead)
-
+        # ---------- daftar lirik ----------
         self.lyrics_scroll = QScrollArea()
         self.lyrics_scroll.setWidgetResizable(True)
         self.lyrics_scroll.setFrameShape(QFrame.NoFrame)
@@ -820,7 +826,7 @@ class Activities(QWidget):
         self.lyrics_content.setAttribute(Qt.WA_StyledBackground, True)
         self.lyrics_content.setStyleSheet("background: transparent;")
         self.lyrics_layout = QVBoxLayout(self.lyrics_content)
-        self.lyrics_layout.setContentsMargins(0, 4, 8, 4)
+        self.lyrics_layout.setContentsMargins(0, 4, 6, 4)
         self.lyrics_layout.setSpacing(6)
         self.lyrics_layout.addStretch(1)
         self.lyrics_scroll.setWidget(self.lyrics_content)
@@ -828,13 +834,80 @@ class Activities(QWidget):
         self._user_scroll_until = 0.0
         self.lyrics_scroll.verticalScrollBar().valueChanged.connect(
             self._on_lyrics_scrolled)
-        rv.addWidget(self.lyrics_scroll, 1)
+        lay.addWidget(self.lyrics_scroll, 1)
 
-        lay.addWidget(right, 1)
+        # ---------- progress ----------
+        prow = QHBoxLayout()
+        prow.setSpacing(8)
+        self.time2_now = QLabel("0:00")
+        self.time2_now.setObjectName("t-tiny")
+        self.time2_now.setFixedWidth(36)
+        prow.addWidget(self.time2_now)
+        self.scrub2 = QFrame()
+        self.scrub2.setObjectName("scrub")
+        self.scrub2.setFixedHeight(5)
+        self.scrub2_fill = QFrame(self.scrub2)
+        self.scrub2_fill.setObjectName("scrub-fill")
+        self.scrub2_fill.setGeometry(0, 0, 0, 5)
+        prow.addWidget(self.scrub2, 1)
+        self.time2_len = QLabel("0:00")
+        self.time2_len.setObjectName("t-tiny")
+        self.time2_len.setFixedWidth(36)
+        self.time2_len.setAlignment(Qt.AlignRight)
+        prow.addWidget(self.time2_len)
+        lay.addLayout(prow)
+
+        # ---------- kontrol bawah + chip sinkron ----------
+        brow = QHBoxLayout()
+        brow.setSpacing(10)
+
+        bprev = QLabel("⏮")
+        bprev.setObjectName("seg-btn")
+        bprev.setAlignment(Qt.AlignCenter)
+        bprev.setFixedSize(36, 30)
+        bprev.installEventFilter(self)
+        bprev.setProperty("sig", self.prev_clicked)
+        brow.addWidget(bprev)
+
+        self.btn_play_small = QLabel("▶")
+        self.btn_play_small.setObjectName("play-small")
+        self.btn_play_small.setAlignment(Qt.AlignCenter)
+        self.btn_play_small.setFixedSize(36, 36)
+        self.btn_play_small.installEventFilter(self)
+        self.btn_play_small.setProperty("sig", self.play_pause_clicked)
+        brow.addWidget(self.btn_play_small)
+
+        bnext = QLabel("⏭")
+        bnext.setObjectName("seg-btn")
+        bnext.setAlignment(Qt.AlignCenter)
+        bnext.setFixedSize(36, 30)
+        bnext.installEventFilter(self)
+        bnext.setProperty("sig", self.next_clicked)
+        brow.addWidget(bnext)
+
+        self.eq_bars = self._make_wave(3, base=14)
+        brow.addWidget(self.eq_bars)
+
+        brow.addStretch(1)
+
+        self.sync_chip = QFrame()
+        self.sync_chip.setObjectName("sync-chip")
+        sl = QHBoxLayout(self.sync_chip)
+        sl.setContentsMargins(9, 0, 11, 0)
+        sl.setSpacing(6)
+        self.sync_dot = QLabel("●")
+        self.sync_dot.setObjectName("sync-dot")
+        sl.addWidget(self.sync_dot)
+        self.sync_text = QLabel("Tersinkron · LRCLIB")
+        self.sync_text.setObjectName("chip-btn-txt")
+        sl.addWidget(self.sync_text)
+        brow.addWidget(self.sync_chip)
+        lay.addLayout(brow)
 
         # state
         self._lyrics_mode = False
-        self._lyric_labels = []      # [(waktu, QLabel)]
+        self._lyric_labels = []
+        self._lyric_rows = []
         self._lyrics_synced = False
         self._lyric_idx = -1
         self._pos_base = 0.0
@@ -851,6 +924,7 @@ class Activities(QWidget):
         if sig == getattr(self, "_lyrics_sig", None):
             return
         self._lyrics_sig = sig
+
         # bersihkan baris lama
         while self.lyrics_layout.count():
             item = self.lyrics_layout.takeAt(0)
@@ -858,6 +932,7 @@ class Activities(QWidget):
             if w is not None:
                 w.deleteLater()
         self._lyric_labels = []
+        self._lyric_rows = []
         self._lyric_idx = -1
         self._user_scroll_until = 0.0
         try:
@@ -865,17 +940,24 @@ class Activities(QWidget):
             self.lyrics_scroll.verticalScrollBar().setValue(0)
         finally:
             self._scroll_programmatic = False
+
         self._lyrics_synced = bool(getattr(result, "synced", False))
         lines = getattr(result, "lines", []) or []
         status = getattr(result, "status", "")
 
+        # chip status sinkron
         if status == "loading":
-            self.lyrics_state.setText("memuat…")
+            self.sync_text.setText("Mencari lirik…")
+            self.sync_dot.setStyleSheet("color: #FBBF24;")
         elif not lines:
-            self.lyrics_state.setText("tidak tersedia")
+            self.sync_text.setText("Tidak tersedia")
+            self.sync_dot.setStyleSheet("color: #6E6B7A;")
+        elif not self._lyrics_synced:
+            self.sync_text.setText("Tanpa sinkron")
+            self.sync_dot.setStyleSheet("color: #6E6B7A;")
         else:
-            # jangan ulangi judul (sudah ada di pemutar kiri) — cukup status
-            self.lyrics_state.setText("tersinkron" if self._lyrics_synced else "tanpa sinkron")
+            self.sync_text.setText("Tersinkron · LRCLIB")
+            self.sync_dot.setStyleSheet("color: #4ADE80;")
 
         if not lines:
             hint = QLabel("Lirik belum tersedia untuk lagu ini." if status != "loading"
@@ -887,40 +969,64 @@ class Activities(QWidget):
             return
 
         dim_pm, _active_pm = self._note_icons(13, 3)
-        for idx, (t, text) in enumerate(lines):
+        for idx, (t_sec, text) in enumerate(lines):
+            row = LyricRow()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(10, 4, 10, 4)
+            rl.setSpacing(8)
+
+            accent = QFrame()
+            accent.setObjectName("lyr-accent")
+            accent.setFixedWidth(4)
+            accent.setStyleSheet("background: #9B87FF; border: none;")
+            accent.hide()
+            rl.addWidget(accent)
+
             lbl = QLabel()
             lbl.setObjectName("lyric-line")
+            lbl.setAutoFillBackground(False)
+            lbl.setStyleSheet("background: transparent; border: none;")
             is_note = not (text or "").strip()
             if is_note and dim_pm is not None:
                 lbl.setPixmap(dim_pm)
                 lbl.setProperty("is_note", True)
                 lbl.setFixedHeight(18)
-                lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             else:
                 lbl.setText(text or " ")
                 lbl.setWordWrap(True)
-            lbl.setProperty("lyric_time", float(t))
-            lbl.setProperty("lyric_idx", idx)
+            rl.addWidget(lbl, 1)
+
+            chip = QLabel(f'<span style="color:#4ADE80">●</span>  {fmt_time(t_sec)}')
+            chip.setTextFormat(Qt.RichText)
+            chip.setObjectName("lyr-time")
+            chip.setAutoFillBackground(False)
+            chip.setStyleSheet("background: transparent; border: none;")
+            chip.hide()
+            rl.addWidget(chip)
+
+            row.setProperty("lyric_time", float(t_sec))
             if self._lyrics_synced:
-                lbl.setCursor(Qt.PointingHandCursor)
+                row.setCursor(Qt.PointingHandCursor)
+                row.installEventFilter(self)
                 lbl.installEventFilter(self)
-            self.lyrics_layout.addWidget(lbl)
+                lbl.setProperty("lyric_time", float(t_sec))
+            self.lyrics_layout.addWidget(row)
+            self._lyric_rows.append((row, accent, lbl, chip, float(t_sec)))
             self._lyric_labels.append(lbl)
+
         self.lyrics_layout.addStretch(1)
 
     def _on_lyrics_scrolled(self, _value: int) -> None:
-        # scroll manual user → tahan auto-scroll sementara (6 dtk)
         if not getattr(self, "_scroll_programmatic", False):
             self._user_scroll_until = time.monotonic() + 6.0
 
-    def _ensure_line_visible(self, lbl) -> None:
-        """Geser hanya bila baris aktif keluar viewport (bukan selalu center)."""
+    def _ensure_line_visible(self, widget) -> None:
         from PySide6.QtCore import QPoint as _QPoint
 
         bar = self.lyrics_scroll.verticalScrollBar()
         vp = self.lyrics_scroll.viewport()
-        y = lbl.mapTo(self.lyrics_content, _QPoint(0, 0)).y()
-        line_h = max(1, lbl.height())
+        y = widget.mapTo(self.lyrics_content, _QPoint(0, 0)).y()
+        line_h = max(1, widget.height())
         top = bar.value()
         bottom = top + vp.height()
         margin = 20
@@ -935,12 +1041,9 @@ class Activities(QWidget):
     def toggle_lyrics(self) -> None:
         self._lyrics_mode = not self._lyrics_mode
         self.music_stack.setCurrentIndex(1 if self._lyrics_mode else 0)
-        # state aktif pada tombol ikon
-        if self._lyrics_mode:
-            self.btn_lyrics.setStyleSheet(
-                "background: rgba(110,139,255,0.35); border-radius: 16px;")
-        else:
-            self.btn_lyrics.setStyleSheet("")
+        if hasattr(self, "lyrics_chip"):
+            self.lyrics_chip.setStyleSheet(
+                "background: rgba(155,135,255,0.28);" if self._lyrics_mode else "")
 
     def _current_pos(self) -> float:
         if self._pos_playing:
@@ -948,13 +1051,12 @@ class Activities(QWidget):
         return self._pos_base
 
     def _lyrics_tick(self) -> None:
-        if not self._lyrics_mode or not self._lyrics_synced or not self._lyric_labels:
+        if not self._lyrics_mode or not self._lyrics_synced or not self._lyric_rows:
             return
         pos = self._current_pos()
         idx = -1
-        for i, (t, _txt) in enumerate(
-                [self._lyric_time_of(lbl) for lbl in self._lyric_labels]):
-            if pos >= t:
+        for i, (_row, _a, _l, _c, tsec) in enumerate(self._lyric_rows):
+            if pos >= tsec:
                 idx = i
             else:
                 break
@@ -963,29 +1065,35 @@ class Activities(QWidget):
             self._clear_all_highlights()
             self._lyric_idx = idx
             if idx >= 0:
-                lbl = self._lyric_labels[idx]
+                row, accent, lbl, chip, _tsec = self._lyric_rows[idx]
+                # satu-satunya background: digambar QPainter di LyricRow
+                row.set_active(True)
+                accent.show()
+                chip.show()
                 if lbl.property("is_note") and active_pm is not None:
                     lbl.setPixmap(active_pm)
                 else:
                     lbl.setStyleSheet(
-                        "color: #6E8BFF; font-weight: 700;")
-                # jangan tarik posisi bila user sedang scroll manual
+                        "background: transparent; border: none;"
+                        "color: #F5F3FF; font-weight: 700;")
                 if time.monotonic() > getattr(self, "_user_scroll_until", 0.0):
-                    self._ensure_line_visible(lbl)
+                    self._ensure_line_visible(row)
 
     def _clear_all_highlights(self) -> None:
-        """Pastikan hanya satu baris yang menyala — bersihkan semua label."""
         dim_pm, _active = self._note_icons(13, 3)
-        for lbl in getattr(self, "_lyric_labels", []):
+        for row, accent, lbl, chip, _tsec in getattr(self, "_lyric_rows", []):
+            if hasattr(row, "set_active"):
+                row.set_active(False)
+            else:
+                row.setStyleSheet("")
+            accent.hide()
+            chip.hide()
             if lbl.property("is_note"):
                 if dim_pm is not None:
                     lbl.setPixmap(dim_pm)
-            elif lbl.styleSheet():
-                lbl.setStyleSheet("")
+            else:
+                lbl.setStyleSheet("background: transparent; border: none;")
         self._lyric_idx = -1
-
-    def _lyric_time_of(self, lbl) -> tuple[float, str]:
-        return (float(lbl.property("lyric_time") or 0.0), lbl.text())
 
     # ============================================================ PAGE: SISTEM
     def _build_page_system(self) -> QWidget:
@@ -1283,8 +1391,9 @@ class Activities(QWidget):
         stamp = _dt.datetime.fromtimestamp(wx.updated).strftime("%H:%M") if wx.updated else "—"
         self.wx_city.setText(f"{wx.city} · diperbarui {stamp}" if wx.city else f"diperbarui {stamp}")
         if hasattr(self, "compact_temp"):
-            self.compact_temp.setText(f"{wx.temp:.0f}°")
-            self.compact_temp.show()
+            self._temp_text = f"{wx.temp:.0f}°"
+            if not self._has_media:
+                self._refresh_idle_sub()
         # strip per jam
         hourly = getattr(wx, "hourly", []) or []
         from ..services import WMO
@@ -1409,7 +1518,7 @@ class Activities(QWidget):
         lay.addStretch(1)
         return {"frame": frame, "val": val, "body": body}
 
-    def _make_wave(self, count: int, base: int) -> QWidget:
+    def _make_wave(self, count: int, base: int, bar_w: int = 3) -> QWidget:
         # Ukuran box dikunci (fixed): animasi tinggi bar TIDAK boleh mengubah
         # sizeHint container, jika tidak layout di sekitarnya ikut jitter.
         box = QWidget()
@@ -1422,11 +1531,11 @@ class Activities(QWidget):
         for _ in range(count):
             bar = QFrame()
             bar.setObjectName("wave")
-            bar.setFixedWidth(3)
+            bar.setFixedWidth(bar_w)
             bar.setFixedHeight(max(3, base // 3))
             lay.addWidget(bar, 0, Qt.AlignVCenter)
             bars.append(bar)
-        total_w = count * 3 + max(0, count - 1) * 3
+        total_w = count * bar_w + max(0, count - 1) * 3
         box.setFixedSize(total_w, base)
         box.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         if not hasattr(self, "_waves"):
@@ -1597,7 +1706,7 @@ class Activities(QWidget):
             return  # basi
         if not path:
             return
-        img = art_loader.load_thumbnail(path, self._art_size, radius=16)
+        img = art_loader.load_thumbnail(path, self._art_size, radius=18)
         if img is None:
             return
         pix = QPixmap.fromImage(img)
@@ -1605,9 +1714,14 @@ class Activities(QWidget):
         self.art_label.setText("")
         self.art_label.setStyleSheet("background: transparent;")
         if hasattr(self, "art2"):
-            self.art2.setPixmap(pix.scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.art2.setPixmap(pix.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self.art2.setText("")
             self.art2.setStyleSheet("background: transparent;")
+        if hasattr(self, "compact_art"):
+            small = art_loader.load_thumbnail(path, 32, radius=9)
+            if small is not None:
+                self.compact_art.setPixmap(QPixmap.fromImage(small))
+            self.compact_slot.setCurrentIndex(0)
         self._art_loaded_url = url
 
     def _art_fallback(self, color: str) -> None:
@@ -1622,7 +1736,7 @@ class Activities(QWidget):
         else:
             self.art_label.setText("♪")
         if hasattr(self, "art2"):
-            pm2 = self._logo_pixmap(34)
+            pm2 = self._logo_pixmap(26)
             self.art2.clear()
             if not pm2.isNull():
                 self.art2.setPixmap(pm2)
@@ -1633,6 +1747,11 @@ class Activities(QWidget):
                     f"background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {C.ACCENT_DEEP},"
                     f" stop:1 #7C5CFF); border-radius: 12px; color: rgba(255,255,255,0.85);"
                     f" font-weight: 700; font-size: 20px; font-family: Sans;")
+        if hasattr(self, "compact_art"):
+            pmc = self._logo_pixmap(20)
+            self.compact_art.clear()
+            if not pmc.isNull():
+                self.compact_art.setPixmap(pmc)
         self._art_loaded_url = ""
 
     def _update_art(self, art_url: str) -> None:
@@ -1661,10 +1780,25 @@ class Activities(QWidget):
             if getattr(self, "_last_title", None) not in (None, np.title):
                 self.sneak_peek("toast", label, "♪", C.TOAST_MS, 15)
             self._last_title = np.title
-            self._base_title = label
+            self._base_title = np.title or "notchy"
+            if hasattr(self, "compact_title"):
+                self.compact_slot.setCurrentIndex(0)
+                self.compact_title.set_full_text(np.title or "(no title)")
+                sub_src = np.identity or "media"
+                self.compact_sub.set_full_text(
+                    f"{sub_src} · {'playing' if np.playing else 'paused'}")
             self._base_icon = "▶" if np.playing else "▶"
             self.title.set_full_text(np.title or "(no title)")
-            self.artist.set_full_text(np.artist or np.album or np.identity or "")
+            if np.artist and np.album:
+                self.artist.set_full_text(f"{np.artist} • {np.album}")
+            else:
+                self.artist.set_full_text(np.artist or np.album or np.identity or "")
+            if hasattr(self, "np_source"):
+                self.np_source.setText(np.identity or "media")
+            if hasattr(self, "btn_play_big"):
+                self.btn_play_big.setText("⏸" if np.playing else "▶")
+            if hasattr(self, "btn_play_small"):
+                self.btn_play_small.setText("⏸" if np.playing else "▶")
             self.time_now.setText(fmt_time(np.position))
             self.time_len.setText(fmt_time(np.length))
             self._set_scrub(np.progress or 0.0)
@@ -1695,8 +1829,18 @@ class Activities(QWidget):
             self._last_title = None
             self._base_title = "notchy"
             self._base_icon = "●"
+            if hasattr(self, "compact_title"):
+                self.compact_slot.setCurrentIndex(1)
+                self.compact_title.set_full_text("notchy")
+                self._refresh_idle_sub()
             self.title.set_full_text("Tidak ada musik")
             self.artist.set_full_text("Putar sesuatu di pemutar favoritmu")
+            if hasattr(self, "np_source"):
+                self.np_source.setText("—")
+            if hasattr(self, "btn_play_big"):
+                self.btn_play_big.setText("▶")
+            if hasattr(self, "btn_play_small"):
+                self.btn_play_small.setText("▶")
             self.time_now.setText("0:00")
             self.time_len.setText("0:00")
             self._set_scrub(0.0)
@@ -1742,7 +1886,22 @@ class Activities(QWidget):
         self.clock_label.setText(st.time_str)
         self.date_label.setText(st.date_str)
         self.compact_clock.setText(st.time_str)
+        self._date_text = st.date_str
+        if not self._has_media:
+            self._refresh_idle_sub()
         self._refresh_compact()
+
+    def _refresh_idle_sub(self) -> None:
+        if not hasattr(self, "compact_sub") or self._has_media:
+            return
+        date = getattr(self, "_date_text", "")
+        temp = getattr(self, "_temp_text", "")
+        parts = [p for p in (date, temp) if p]
+        self.compact_sub.set_full_text(" · ".join(parts))
+
+    def wake_eyes(self) -> None:
+        if hasattr(self, "compact_eyes"):
+            self.compact_eyes.wake()
 
     def _apply_fill_frac(self, frac: float) -> None:
         frac = max(0.0, min(1.0, frac))
@@ -1813,11 +1972,11 @@ class Activities(QWidget):
 
         def step(u: float) -> None:
             a = abs(math.sin(float(u) * math.pi * 2.0)) * 0.55
-            self.compact_dot.setStyleSheet(
-                f"background: rgba(110,139,255,{a:.2f}); border-radius: 11px;")
+            self.compact_slot.setStyleSheet(
+                f"border: 2px solid rgba(155,135,255,{a:.2f}); border-radius: 15px;")
 
         anim.valueChanged.connect(step)
-        anim.finished.connect(lambda: self.compact_dot.setStyleSheet(""))
+        anim.finished.connect(lambda: self.compact_slot.setStyleSheet(""))
         self._halo_anim = anim
         anim.start()
 
