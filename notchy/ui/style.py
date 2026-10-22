@@ -197,6 +197,39 @@ ISLAND_QSS = f"""
 #lyr-sub {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 12px; font-family: "Inter"; }}
 #lyr-dot {{ color: {C.ACCENT_GREEN}; font-size: 8px; font-family: "Inter"; }}
 #sync-dot {{ color: {C.ACCENT_GREEN}; font-size: 8px; font-family: "Inter"; }}
+
+/* --- Shelf --- */
+#shelf-row {{
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+}}
+#shelf-row:hover {{ background: rgba(255,255,255,0.05); }}
+#shelf-name {{ color: {C.TEXT}; font-weight: 500; font-size: 13px; font-family: "Inter"; }}
+#shelf-meta {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 11px; font-family: "Inter"; }}
+#shelf-icon {{ background: transparent; }}
+#shelf-remove {{
+    color: {C.TEXT_DIM};
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600; font-size: 14px; font-family: "Inter";
+}}
+#shelf-remove:hover {{ background: rgba(255,255,255,0.10); color: {C.TEXT}; }}
+#shelf-remove:focus {{ background: rgba(155,135,255,0.20); color: {C.TEXT}; }}
+#shelf-scroll, #shelf-scroll QWidget,
+#shelf-scroll QWidget#qt_scrollarea_viewport {{ background: transparent; }}
+#shelf-scroll {{ border: none; }}
+#shelf-scroll QScrollBar:vertical {{ background: transparent; width: 6px; margin: 0; }}
+#shelf-scroll QScrollBar::handle:vertical {{
+    background: rgba(255,255,255,0.18); border-radius: 3px; min-height: 20px;
+}}
+#shelf-scroll QScrollBar::add-line:vertical,
+#shelf-scroll QScrollBar::sub-line:vertical {{ height: 0; }}
+#shelf-empty-icon {{ color: {C.ACCENT}; font-weight: 600; font-size: 30px; font-family: "Inter"; }}
+#shelf-empty-title {{ color: {C.TEXT}; font-weight: 600; font-size: 14px; font-family: "Inter"; }}
+#shelf-empty-sub {{ color: {C.TEXT_DIM}; font-weight: 400; font-size: 12px; font-family: "Inter"; }}
+#shelf-empty-hint {{ color: {C.TEXT_FAINT}; font-weight: 400; font-size: 10px; font-family: "Inter"; }}
 #play-small {{
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
         stop:0 {C.ACCENT_DEEP}, stop:1 {C.ACCENT2});

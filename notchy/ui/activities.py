@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import art as art_loader
+from .shelf import DropOverlay, ShelfPage
 from .. import config as C
 
 
@@ -292,8 +293,9 @@ class Activities(QWidget):
     loop_clicked = Signal()
     lyrics_seek = Signal(float)         # detik absolut dari klik baris lirik
 
-    def __init__(self, timer=None, parent=None) -> None:
+    def __init__(self, timer=None, shelf=None, parent=None) -> None:
         super().__init__(parent)
+        self.shelf = shelf
         # WA_StyledBackground: wajib agar QSS #island-bg terpaint pada QWidget custom
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.timer = timer
@@ -322,6 +324,7 @@ class Activities(QWidget):
         self.expanded.setParent(self)
 
         self._fx = EventOverlay(self)
+        self._drop_overlay = DropOverlay(self)
 
         self._compact_fx = QGraphicsOpacityEffect(self.compact)
         self.compact.setGraphicsEffect(self._compact_fx)
@@ -521,6 +524,8 @@ class Activities(QWidget):
         self.pages.addWidget(self._build_page_music())
         self.pages.addWidget(self._build_page_system())
         self.pages.addWidget(self._build_page_info())
+        self.pages.addWidget(self._build_page_shelf())
+        self.pages.currentChanged.connect(self._on_page_changed)
         lay.addWidget(self.pages, 1)
 
         # ---------- footer (tetap di semua tab) ----------
@@ -558,7 +563,7 @@ class Activities(QWidget):
         lay.addWidget(footer)
 
         self._tab_index = 0
-        self._tab_names = ("Musik", "Sistem", "Info")
+        self._tab_names = ("Musik", "Sistem", "Info", "Shelf")
         return box
 
     # ============================================================ PAGE: MUSIK
@@ -1427,6 +1432,43 @@ class Activities(QWidget):
             self._dl_phase = 0.0
             self._dl_marquee_t.start()
 
+    # ============================================================ PAGE: SHELF
+    def _build_page_shelf(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.shelf_page = ShelfPage(self.shelf) if self.shelf is not None else None
+        if self.shelf_page is not None:
+            lay.addWidget(self.shelf_page)
+        return page
+
+    def _on_page_changed(self, index: int) -> None:
+        if index == 3 and getattr(self, "shelf_page", None) is not None:
+            self.shelf_page.refresh_states()
+
+    # ------------------------------------------------------------ shelf API
+    def switch_to_shelf(self) -> None:
+        if getattr(self, "_tab_busy", False):
+            QTimer.singleShot(450, self.switch_to_shelf)
+            return
+        self._set_tab(3)
+
+    def shelf_added(self, items, first: bool = False) -> None:
+        if getattr(self, "shelf_page", None) is not None:
+            self.shelf_page.add_items(list(items), animate=True)
+
+    def shelf_removed(self, item_id: str) -> None:
+        if getattr(self, "shelf_page", None) is not None:
+            self.shelf_page.remove_row(item_id, animate=True)
+
+    def shelf_refresh(self) -> None:
+        if getattr(self, "shelf_page", None) is not None:
+            self.shelf_page.refresh_states()
+
+    def drop_state(self, state: str, count: int = 0) -> None:
+        self._drop_overlay.set_state(state, count)
+
     # ------------------------------------------------------------ tab nav
     def switch_tab(self, delta: int) -> None:
         total = self.pages.count()
@@ -1699,6 +1741,10 @@ class Activities(QWidget):
             self._fx.setGeometry(0, 0, w, h)
             if self._fx.isVisible():
                 self._fx.raise_()
+        if hasattr(self, "_drop_overlay"):
+            self._drop_overlay.setGeometry(0, 0, w, h)
+            if self._drop_overlay.isVisible():
+                self._drop_overlay.raise_()
 
     # ------------------------------------------------------------ update
     def _set_thumb(self, path: str, url: str) -> None:

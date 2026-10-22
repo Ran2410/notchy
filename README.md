@@ -76,6 +76,14 @@ klik kanan → Quit · slider volume langsung bekerja.
   (`.part`/`.crdownload`/ukuran membesar), toast saat mulai & selesai
 - **Alert baterai** — toast saat mulai mengisi, daya dicabut, baterai lemah
   (≤20%, sekali per sesi), dan hampir penuh (≥99%)
+- **Rak Berkas (Shelf)** — seret file/folder dari file manager ke island:
+  tab ke-4 dengan daftar ringkas satu kolom; drop pertama otomatis membuka
+  Shelf & memperluas panel, drop berikutnya tidak memindahkan tab; klik
+  untuk membuka, seret keluar ke aplikasi lain, hapus eksplisit (file asli
+  tidak pernah disentuh). Referensi disimpan di
+  `~/.local/share/notchy/shelf.json` (atomik, file rusak dicadangkan).
+  Overlay drop: border dashed violet berdenyut (valid) / merah (invalid),
+  animasi masuk item bertahap, status **Missing** untuk file yang hilang.
 - **Deteksi headset/earphone** — Bluetooth via sinyal BlueZ
   (`org.bluez.Device1.Connected`, difilter UUID audio) + jack 3.5mm via
   **status route PipeWire** (`analog-output-headphones: available=yes/no`,
@@ -129,6 +137,9 @@ notchy/ui/
     style.py                QSS dark-glass
 notchy/timer.py             kontrol timer/pomodoro
 notchy/services.py          cuaca (Open-Meteo), agenda ICS, watcher unduhan
+notchy/shelf.py             model & persistensi Rak Berkas (JSON atomik)
+notchy/ui/shelf.py          baris, halaman daftar, overlay drag-drop
+tests/                      tes model/persistensi + tes UI offscreen
 legacy/gtk/                 implementasi GTK3 lama (Linux-only, referensi)
 scripts/capture_qt.py       uji visual → shots/ (di-ignore)
 ```

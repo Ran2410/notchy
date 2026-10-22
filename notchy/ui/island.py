@@ -8,6 +8,7 @@ Padanan temuan REA boring.notch:
 """
 from __future__ import annotations
 
+import os
 import sys
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer, Signal
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from .. import config as C
 from ..providers import make_providers
+from ..shelf import ShelfModel, normalize_path
 from ..services import DownloadsService, LyricsResult, LyricsService, WeatherService
 from ..timer import TimerController
 from .activities import Activities
@@ -28,12 +30,13 @@ class IslandWindow(QWidget):
     # diteruskan dari thread notifikasi D-Bus ke main loop Qt
     notif_received = Signal(str, str)
 
-    def __init__(self) -> None:
+    def __init__(self, shelf: ShelfModel | None = None) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setObjectName("Island")
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, False)
         self.setWindowTitle("notchy")
+        self.setAcceptDrops(True)
 
         import os as _os
         from PySide6.QtGui import QIcon as _QIcon
@@ -48,6 +51,9 @@ class IslandWindow(QWidget):
 
         self.sys_state = SystemState()
         self.timer_controller = TimerController(self)
+        self.shelf = shelf if shelf is not None else ShelfModel()
+        self._drop_processing = False
+        self._drop_valid = False
 
         # Prioritas 2
         self.weather = WeatherService()
@@ -58,7 +64,8 @@ class IslandWindow(QWidget):
         self._bat_full_alerted = False
         self._last_charging = None
 
-        self.activities = Activities(timer=self.timer_controller, parent=self)
+        self.activities = Activities(timer=self.timer_controller,
+                                      shelf=self.shelf, parent=self)
         self.activities.setObjectName("island-bg")
         self.setStyleSheet(ISLAND_QSS)
 
@@ -298,6 +305,86 @@ class IslandWindow(QWidget):
             self._animate_to(1.0)
         else:
             self.collapse()
+
+    # ------------------------------------------------------------ drag & drop
+    @staticmethod
+    def _drop_paths(mime) -> list[str]:
+        if mime is None or not mime.hasUrls():
+            return []
+        out: list[str] = []
+        seen: set[str] = set()
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            try:
+                path = normalize_path(url.toLocalFile())
+            except Exception:
+                continue
+            if path in seen or not os.path.exists(path):
+                continue
+            seen.add(path)
+            out.append(path)
+        return out
+
+    def dragEnterEvent(self, ev) -> None:
+        paths = self._drop_paths(ev.mimeData())
+        self._drop_valid = bool(paths)
+        if paths:
+            ev.acceptProposedAction()
+            self.activities.drop_state("DRAG_OVER_VALID", len(paths))
+        else:
+            ev.ignore()
+            self.activities.drop_state("DRAG_OVER_INVALID")
+
+    def dragMoveEvent(self, ev) -> None:
+        if self._drop_valid:
+            ev.acceptProposedAction()
+        else:
+            ev.ignore()
+
+    def dragLeaveEvent(self, ev) -> None:
+        self._drop_valid = False
+        self.activities.drop_state("IDLE")
+        super().dragLeaveEvent(ev)
+
+    def dropEvent(self, ev) -> None:
+        if self._drop_processing:
+            ev.ignore()
+            return
+        paths = self._drop_paths(ev.mimeData())
+        if not paths:
+            self.activities.drop_state("DRAG_OVER_INVALID")
+            QTimer.singleShot(900, lambda: self.activities.drop_state("IDLE"))
+            ev.ignore()
+            return
+        self._drop_processing = True
+        self._drop_valid = False
+        self.activities.drop_state("DROP_PROCESSING", len(paths))
+        ev.acceptProposedAction()
+        QTimer.singleShot(0, lambda p=list(paths): self._apply_drop(p))
+
+    def _apply_drop(self, paths: list[str]) -> None:
+        """Tambahkan referensi; switch tab hanya bila shelf SEBELUMNYA kosong."""
+        try:
+            was_empty = self.shelf.is_empty
+            added, _skipped = self.shelf.add_paths(paths)
+        except Exception:
+            added = []
+            was_empty = False
+        self._drop_processing = False
+
+        if not added:
+            self.activities.drop_state("DRAG_OVER_INVALID")
+            QTimer.singleShot(900, lambda: self.activities.drop_state("IDLE"))
+            return
+
+        self.activities.drop_state("DROP_SUCCESS", len(added))
+        self.activities.shelf_added(added, first=was_empty)
+        if was_empty:
+            # buka tab Shelf + perluas agar item terlihat
+            self.activities.switch_to_shelf()
+            self.expand()
+        QTimer.singleShot(1000, lambda: self.activities.drop_state("IDLE"))
 
     # ------------------------------------------------------------ event
     def enterEvent(self, ev) -> None:
